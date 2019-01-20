@@ -8,7 +8,6 @@ node_js:
   - '10'
   - '11'
   - '8'
-  - '6'
 script:
   - yarn run test:prod && yarn run build
 branches:
