@@ -31,7 +31,7 @@ console.log(conf.get('foo.bar')); // get nested key use dot notation
 2) If u would like override default values, you can pass 2 arguments to
 class constructor or set up use setters.
 
-```php
+```ts
 import Configuration from 'configuration-js';
 
 const conf = new Configuration('./configuration', 'test');
@@ -48,7 +48,7 @@ export CONFIG_PATH=/configuration
 export STAGE=prod
 ```
 
-```php
+```ts
 import Configuration from 'configuration-js';
 
 const conf = new Configuration('./configuration', 'test');
