@@ -1,6 +1,7 @@
 import Configuration from "../src/configuration-js";
 import * as winston from "winston";
-import WinstonConsoleLogger from "../src/winston-console-logger";
+import WinstonConsoleLogger from '../src/winston-console-logger';
+import StdoutConsoleLogger from '../src/stdout-console-logger';
 
 /**
  * Configuration test
@@ -109,6 +110,12 @@ describe('Configuration test', () => {
           new winston.transports.Console()
       ]
     }));
+    conf.load();
+  });
+
+  it('works with stdout logger', () => {
+    const conf = new Configuration('./test/configuration_symlinks', 'test');
+    conf.logger = new StdoutConsoleLogger(true);
     conf.load();
   });
 });

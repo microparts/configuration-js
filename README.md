@@ -4,6 +4,9 @@ Javascript microservice configuration module
 Configuration module for microservices written on TypeScript. Specially created
 for follow up corporate standards of application configuration.
 
+
+Available usage in browsers*.
+
 ## Installation
 
 ```bash
@@ -19,7 +22,7 @@ loading from `/app/configuration` with `local` stage.
 
 1) Simple
 ```ts
-import Configuration from '@microparts/configuration-js';
+import { Configuration } from '@microparts/configuration-js';
 
 const conf = new Configuration();
 conf.load();
@@ -32,7 +35,7 @@ console.log(conf.get('foo.bar')); // get nested key use dot notation
 class constructor or set up use setters.
 
 ```ts
-import Configuration from '@microparts/configuration-js';
+import { Configuration } from '@microparts/configuration-js';
 
 const conf = new Configuration('./configuration', 'test');
 conf.load();
@@ -49,7 +52,7 @@ export STAGE=prod
 ```
 
 ```ts
-import Configuration from '@microparts/configuration-js';
+import { Configuration } from '@microparts/configuration-js';
 
 const conf = new Configuration('./configuration', 'test');
 conf.load(); // loaded files from /configuration for prod stage.
@@ -69,20 +72,81 @@ yarn add winston
 
 Second, pass you logger to property like this:
 ```ts
-import Configuration from '@microparts/configuration-js';
-import WinstonConsoleLogger from '@microparts/configuration-js/dist/lib/winston-console-logger';
+import { Configuration, WinstonConsoleLogger, StdoutConsoleLogger } from '@microparts/configuration-js';
 
 const conf = new Configuration();
 conf.logger = new WinstonConsoleLogger(winston.createLogger({
   transports: [new winston.transports.Console()]
 }));
 
+// or
+
+conf.logger = new StdoutConsoleLogger();
 conf.load();
 
 conf.get('foo'); // full example on the top
 ```
 
 Also, your can pass any logger who implements library `LoggerInterface`.
+
+## How to usage library with SPA apps?
+
+It simple. Step by step:
+
+1. Create an vue app for example
+```bash
+vue create vue-app
+```
+2. Install this package
+```bash
+yarn add @microparts/configuration-js
+```
+3. Put config files [like this](./example/configuration)
+4. Change `vue.config.js` to build final config to global variables:
+```js
+const { Configuration, StdoutConsoleLogger } = require('@microparts/configuration-js');
+
+module.exports = {
+  lintOnSave: false,
+  chainWebpack: config => {
+    config.plugin('html').tap(options => {
+      const conf = new Configuration();
+      conf.logger = new StdoutConsoleLogger();
+      conf.load();
+
+      options[0].__config = JSON.stringify(conf.all());
+      options[0].__stage = conf.stage;
+
+      return options;
+    });
+  }
+};
+```
+5. Add following code to `index.html` to head of `<head>` html tag:
+```html
+<head>
+  <% if (htmlWebpackPlugin.options.__stage === 'local') { %>
+    <script>
+      window.__config = JSON.parse('<%= htmlWebpackPlugin.options.__config %>');
+      window.__stage = '<%= htmlWebpackPlugin.options.__stage %>';
+      window.__vcs = '';
+    </script>
+  <% } %>
+<!-- ... meta tags and other code -->
+```
+6. Change `serve` script in the `packages.json` file.
+```bash
+# "serve": "CONFIG_PATH=./configuration vue-cli-service serve",
+```
+7. Run application.
+```bash
+yarn serve
+```
+
+Full example available [here](./example/vue-app).
+
+**Note:** <br>
+https://github.com/microparts/static-server-php is required for server usage.
 
 ## License
 

@@ -1,11 +1,11 @@
 {
   "name": "@microparts/configuration-js",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Configuration module for microservices written on TypeScript. Specially created for follow up corporate standards of application configuration.",
   "keywords": [],
-  "main": "dist/configuration-js.umd.js",
-  "module": "dist/configuration-js.es5.js",
-  "typings": "dist/types/configuration-js.d.ts",
+  "main": "dist/index.umd.js",
+  "module": "dist/index.es5.js",
+  "typings": "dist/types/index.d.ts",
   "files": [
     "dist"
   ],
@@ -21,7 +21,7 @@
   "scripts": {
     "lint": "tslint  --project tsconfig.json -t codeFrame 'src/**/*.ts' 'test/**/*.ts'",
     "prebuild": "rimraf dist",
-    "build": "tsc --module commonjs && rollup -c rollup.config.ts && typedoc --out docs --target es6 --theme minimal --mode file src",
+    "build": "tsc --module commonjs && rollup -c rollup.config.ts",
     "start": "rollup -c rollup.config.ts -w",
     "test": "jest --coverage",
     "test:watch": "jest --coverage --watch",
@@ -59,8 +59,8 @@
     ],
     "coverageThreshold": {
       "global": {
-        "branches": 70,
-        "functions": 70,
+        "branches": 60,
+        "functions": 60,
         "lines": 80,
         "statements": 80
       }
@@ -109,7 +109,6 @@
     "tslint": "^5.11.0",
     "tslint-config-prettier": "^1.15.0",
     "tslint-config-standard": "^8.0.1",
-    "typedoc": "^0.12.0",
     "typescript": "^3.0.3",
     "winston": "^3.1.0"
   },
