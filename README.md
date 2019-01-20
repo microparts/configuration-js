@@ -40,6 +40,9 @@ class constructor or set up use setters.
 import { Configuration } from '@microparts/configuration-js';
 
 const conf = new Configuration('./configuration', 'test');
+// or
+// conf.path = './configs';
+// conf.stage = 'local';
 conf.load();
 
 conf.get('foo'); // full example on the top
