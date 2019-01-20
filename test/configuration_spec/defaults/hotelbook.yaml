@@ -1,0 +1,15 @@
+defaults: # Stage "defaults" - место хранения значений по-умолчанию
+  hotelbook_params:
+    area_mapping:
+      KRK: Krakow
+      MSK: Moscow
+      CHB: Челябинск
+  logging: debug
+  default_list:
+    - foo
+  empty_array: []
+
+shared:
+  agents_id:
+    - hotelbook: 1
+    - zobroniruy: 2
