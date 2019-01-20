@@ -1,6 +1,8 @@
 Javascript microservice configuration module
 --------------------------------------------
 
+[![Build Status](https://travis-ci.org/microparts/configuration-js.svg?branch=master)](https://travis-ci.org/microparts/configuration-js)
+
 Configuration module for microservices written on TypeScript. Specially created
 for follow up corporate standards of application configuration.
 
