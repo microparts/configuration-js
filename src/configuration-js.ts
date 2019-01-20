@@ -1,4 +1,4 @@
-import * as yaml from 'js-yaml';
+import * as yaml_ from 'js-yaml';
 import fg from 'fast-glob';
 import * as fs from 'fs';
 import { EntryItem } from 'fast-glob/out/types/entries';
@@ -9,6 +9,7 @@ import NullLogger from './null-logger';
 
 // https://github.com/rollup/rollup/issues/670
 let deepmerge: any = (deepmerge_ as any).default || deepmerge_;
+let yaml: any = (yaml_ as any).default || yaml_;
 
 export default class Configuration {
 

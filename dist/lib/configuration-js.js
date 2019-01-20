@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-var yaml = require("js-yaml");
+var yaml_ = require("js-yaml");
 var fast_glob_1 = require("fast-glob");
 var fs = require("fs");
 var deepmerge_ = require("deepmerge");
@@ -8,6 +8,7 @@ var lodash_1 = require("lodash");
 var null_logger_1 = require("./null-logger");
 // https://github.com/rollup/rollup/issues/670
 var deepmerge = deepmerge_.default || deepmerge_;
+var yaml = yaml_.default || yaml_;
 var Configuration = /** @class */ (function () {
     /**
      * Configuration constructor.

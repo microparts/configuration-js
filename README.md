@@ -7,9 +7,9 @@ for follow up corporate standards of application configuration.
 ## Installation
 
 ```bash
-npm install --save configuration-js
+npm install --save @microparts/configuration-js
 
-yarn add configuration-js
+yarn add @microparts/configuration-js
 ```
 
 ## Usage
@@ -19,7 +19,7 @@ loading from `/app/configuration` with `local` stage.
 
 1) Simple
 ```ts
-import Configuration from 'configuration-js';
+import Configuration from '@microparts/configuration-js';
 
 const conf = new Configuration();
 conf.load();
@@ -32,7 +32,7 @@ console.log(conf.get('foo.bar')); // get nested key use dot notation
 class constructor or set up use setters.
 
 ```ts
-import Configuration from 'configuration-js';
+import Configuration from '@microparts/configuration-js';
 
 const conf = new Configuration('./configuration', 'test');
 conf.load();
@@ -49,7 +49,7 @@ export STAGE=prod
 ```
 
 ```ts
-import Configuration from 'configuration-js';
+import Configuration from '@microparts/configuration-js';
 
 const conf = new Configuration('./configuration', 'test');
 conf.load(); // loaded files from /configuration for prod stage.
@@ -60,7 +60,7 @@ conf.get('foo'); // full example on the top
 4) If u want to see logs and see how load process working,
 pass you logger to property:
 
-First, install logger (winston supported bu default):
+First, install logger (winston supported by default):
 ```bash
 npm install --save winston
 
@@ -69,8 +69,8 @@ yarn add winston
 
 Second, pass you logger to property like this:
 ```ts
-import Configuration from 'configuration-js';
-import WinstonConsoleLogger from 'configuration-js/winston-console-logger';
+import Configuration from '@microparts/configuration-js';
+import WinstonConsoleLogger from '@microparts/configuration-js/dist/lib/winston-console-logger';
 
 const conf = new Configuration();
 conf.logger = new WinstonConsoleLogger(winston.createLogger({
