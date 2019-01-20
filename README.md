@@ -101,7 +101,7 @@ vue create vue-app
 ```bash
 yarn add @microparts/configuration-js
 ```
-3. Put config files [like this](./example/configuration)
+3. Put config files [like this](./example/vue-app/configuration)
 4. Change `vue.config.js` to build final config to global variables:
 ```js
 const { Configuration, StdoutConsoleLogger } = require('@microparts/configuration-js');
