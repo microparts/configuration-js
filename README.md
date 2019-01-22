@@ -139,10 +139,12 @@ module.exports = {
   <% } %>
 <!-- ... meta tags and other code -->
 ```
-6. Change `serve` script in the `packages.json` file.
+6. Change `serve` script in the `packages.json` file. 
 ```bash
 # "serve": "CONFIG_PATH=./configuration vue-cli-service serve",
 ```
+Windows user? You can install [cross-env](https://www.npmjs.com/package/cross-env) package for cross-platform env export.
+
 7. Run application.
 ```bash
 yarn serve
