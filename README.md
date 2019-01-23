@@ -1,13 +1,12 @@
-Javascript microservice configuration module
---------------------------------------------
+Javascript microservice configuration library
+---------------------------------------------
 
 [![Build Status](https://travis-ci.org/microparts/configuration-js.svg?branch=master)](https://travis-ci.org/microparts/configuration-js)
 
-Configuration module for microservices written on TypeScript. Specially created
-for follow up corporate standards of application configuration.
+Production-ready configuration for microservices. Written in TypeScript.
+Library works with nodejs apps and with [browsers*](#how-to-usage-library-with-spa-apps).
 
-
-Available usage in browsers*.
+Library created for follow up corporate standards of application configuration.
 
 ## Installation
 
@@ -68,11 +67,27 @@ conf.get('foo'); // full example on the top
 4) If u want to see logs and see how load process working,
 pass you logger to property:
 
-First, install logger (winston supported by default):
+Pass it like this:
+```ts
+import { Configuration, StdoutConsoleLogger } from '@microparts/configuration-js';
+
+const conf = new Configuration();
+conf.logger = new StdoutConsoleLogger();
+conf.load();
+
+conf.get('foo'); // full example on the top
+```
+
+Or if you would like use external logger, like [Winston](https://github.com/winstonjs/winston), you can
+integrate it with [LoggerInterface](./src/logger-interface.ts). Just a write the adapter like as [WinstonConsoleLogger](./src/winston-console-logger.ts).
+
+For now, by default library support one Winston transport called `Console`.
+Okay, let's go use adapter for him...
+
+First, install logger:
 ```bash
 npm install --save winston
-
-yarn add winston
+// or yarn add winston
 ```
 
 Second, pass you logger to property like this:
@@ -84,17 +99,17 @@ conf.logger = new WinstonConsoleLogger(winston.createLogger({
   transports: [new winston.transports.Console()]
 }));
 
-// or
-
-conf.logger = new StdoutConsoleLogger();
 conf.load();
 
-conf.get('foo'); // full example on the top
+conf.get('foo'); // get value of `foo`
 ```
 
-Also, your can pass any logger who implements library `LoggerInterface`.
-
 ## How to usage library with SPA apps?
+
+**Note:** <br>
+https://github.com/microparts/static-server-php is required for usage on the server/cloud.
+
+For most cases, this [Dockerfile](./example/vue-app/Dockerfile) can help your application build's in the cloud.
 
 It simple. Step by step:
 
@@ -115,8 +130,8 @@ module.exports = {
   lintOnSave: false,
   chainWebpack: config => {
     config.plugin('html').tap(options => {
-      const conf = new Configuration();
-      conf.logger = new StdoutConsoleLogger();
+      const conf = new Configuration('./configuration');
+      conf.logger = new StdoutConsoleLogger(); // new StdoutConsoleLogger(true); // for debug
       conf.load();
 
       options[0].__config = JSON.stringify(conf.all());
@@ -127,7 +142,7 @@ module.exports = {
   }
 };
 ```
-5. Add following code to `index.html` to head of `<head>` html tag:
+5. Add following code to `index.html` to **top** of `<head>` html tag:
 ```html
 <head>
   <% if (htmlWebpackPlugin.options.__stage === 'local') { %>
@@ -139,19 +154,12 @@ module.exports = {
   <% } %>
 <!-- ... meta tags and other code -->
 ```
-6. Change `serve` script in the `packages.json` file.
-```bash
-# "serve": "CONFIG_PATH=./configuration vue-cli-service serve",
-```
-7. Run application.
+6. Run application.
 ```bash
 yarn serve
 ```
 
-Full example available [here](./example/vue-app).
-
-**Note:** <br>
-https://github.com/microparts/static-server-php is required for server usage.
+Full example available at [here](./example/vue-app).
 
 ## License
 
