@@ -1,6 +1,6 @@
 {
   "name": "@microparts/configuration-js",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Configuration module for microservices written on TypeScript. Specially created for follow up corporate standards of application configuration.",
   "keywords": [],
   "main": "dist/index.umd.js",
