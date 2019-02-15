@@ -113,6 +113,40 @@ export default class Configuration {
     }
 
     /**
+     * Return all merged config converted to json.
+     */
+    public asJson(escapeQuotes: boolean = false): string {
+        const json = JSON.stringify(this.config);
+
+        return escapeQuotes ? Configuration.escape(json) : json;
+    }
+
+    /**
+     * Return all merged config converted to escaped json.
+     */
+    public asEscapedJson(): string {
+        return this.asJson(true);
+    }
+
+    /**
+     * Escape json.
+     *
+     * @param value
+     */
+    private static escape(value: string): string {
+        return value
+            .replace(/[\\]/g, '\\\\')
+            .replace(/[']/g, '\\\'')
+            .replace(/["]/g, '\\\"')
+            .replace(/[\/]/g, '\\/')
+            .replace(/[\b]/g, '\\b')
+            .replace(/[\f]/g, '\\f')
+            .replace(/[\n]/g, '\\n')
+            .replace(/[\r]/g, '\\r')
+            .replace(/[\t]/g, '\\t');
+    }
+
+    /**
      * Parses configuration and makes a tree of it
      */
     private parseConfiguration(stage: string = 'defaults'): Object {

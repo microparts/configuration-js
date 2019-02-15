@@ -3,6 +3,22 @@ import * as winston from "winston";
 import WinstonConsoleLogger from '../src/winston-console-logger';
 import StdoutConsoleLogger from '../src/stdout-console-logger';
 
+const symlinkExpected = {
+  redis: {
+    hostname: '127.0.0.1',
+    password: '',
+    database: 0,
+    port: 6379,
+  },
+  debug: true,
+  log: {
+    level: 'wa"rn',
+    format: "js'on",
+  },
+  host: 'localhost',
+  port: 8080,
+};
+
 /**
  * Configuration test
  */
@@ -82,25 +98,19 @@ describe('Configuration test', () => {
     const conf = new Configuration('./test/configuration_symlinks', 'test');
     conf.load();
 
-    const expected = {
-      redis: {
-        hostname: '127.0.0.1',
-        password: '',
-        database: 0,
-        port: 6379,
-      },
-      debug: true,
-      log: {
-        level: 'warn',
-        format: 'json',
-      },
-      host: 'localhost',
-      port: 8080,
-    };
-
-    expect(conf.all()).toEqual(expected);
+    expect(conf.all()).toEqual(symlinkExpected);
     expect(conf.get('redis.port')).toBe(6379);
     expect(conf.get('debug')).toBeTruthy();
+  });
+
+  it('return correct json', () => {
+    const conf = new Configuration('./test/configuration_symlinks', 'test');
+    conf.load();
+
+    /* eslint no-eval: 0 */
+
+    expect(JSON.parse(conf.asJson())).toEqual(symlinkExpected);
+    expect(JSON.parse(eval(`"${conf.asEscapedJson()}"`))).toEqual(symlinkExpected);
   });
 
   it('works with logger', () => {

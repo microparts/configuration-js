@@ -1,7 +1,7 @@
 defaults:
   debug: false
   log:
-    level: "warn"
-    format: "json"
+    level: 'wa"rn'
+    format: "js'on"
   host: "localhost"
   port: 8080
