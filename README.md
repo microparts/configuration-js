@@ -134,7 +134,7 @@ module.exports = {
       conf.logger = new StdoutConsoleLogger(); // new StdoutConsoleLogger(true); // for debug
       conf.load();
 
-      options[0].__config = JSON.stringify(conf.all());
+      options[0].__config = conf.asEscapedJson();
       options[0].__stage = conf.stage;
 
       return options;
@@ -142,12 +142,12 @@ module.exports = {
   }
 };
 ```
-5. Add following code to `index.html` to **top** of `<head>` html tag:
+5. Add following code to `index.html` to **top** of `<head>` html tag (**before all scripts**):
 ```html
 <head>
   <% if (htmlWebpackPlugin.options.__stage === 'local') { %>
     <script>
-      window.__config = JSON.parse('<%= htmlWebpackPlugin.options.__config %>');
+      window.__config = JSON.parse("<%= htmlWebpackPlugin.options.__config %>");
       window.__stage = '<%= htmlWebpackPlugin.options.__stage %>';
       window.__vcs = '';
     </script>
