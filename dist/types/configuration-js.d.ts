@@ -51,6 +51,20 @@ export default class Configuration {
      */
     all(): Object;
     /**
+     * Return all merged config converted to json.
+     */
+    asJson(escapeQuotes?: boolean): string;
+    /**
+     * Return all merged config converted to escaped json.
+     */
+    asEscapedJson(): string;
+    /**
+     * Escape json.
+     *
+     * @param value
+     */
+    private static escape;
+    /**
      * Parses configuration and makes a tree of it
      */
     private parseConfiguration;

@@ -73,6 +73,37 @@ var Configuration = /** @class */ (function () {
         return this.config;
     };
     /**
+     * Return all merged config converted to json.
+     */
+    Configuration.prototype.asJson = function (escapeQuotes) {
+        if (escapeQuotes === void 0) { escapeQuotes = false; }
+        var json = JSON.stringify(this.config);
+        return escapeQuotes ? Configuration.escape(json) : json;
+    };
+    /**
+     * Return all merged config converted to escaped json.
+     */
+    Configuration.prototype.asEscapedJson = function () {
+        return this.asJson(true);
+    };
+    /**
+     * Escape json.
+     *
+     * @param value
+     */
+    Configuration.escape = function (value) {
+        return value
+            .replace(/[\\]/g, '\\\\')
+            .replace(/[']/g, '\\\'')
+            .replace(/["]/g, '\\\"')
+            .replace(/[\/]/g, '\\/')
+            .replace(/[\b]/g, '\\b')
+            .replace(/[\f]/g, '\\f')
+            .replace(/[\n]/g, '\\n')
+            .replace(/[\r]/g, '\\r')
+            .replace(/[\t]/g, '\\t');
+    };
+    /**
      * Parses configuration and makes a tree of it
      */
     Configuration.prototype.parseConfiguration = function (stage) {
