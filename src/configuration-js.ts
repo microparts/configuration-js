@@ -1,15 +1,12 @@
-import * as yaml_ from 'js-yaml';
-import fg from 'fast-glob';
-import * as fs from 'fs';
-import { EntryItem } from 'fast-glob/out/types/entries';
-import * as deepmerge_ from 'deepmerge';
+const fg = require('fast-glob');
+const yaml = require('js-yaml');
+const deepmerge = require('deepmerge');
+const fs = require('fs');
+
+import { EntryItem } from 'fast-glob/out/types';
 import { get } from 'lodash';
 import LoggerInterface from './logger-interface';
 import NullLogger from './null-logger';
-
-// https://github.com/rollup/rollup/issues/670
-let deepmerge: any = (deepmerge_ as any).default || deepmerge_;
-let yaml: any = (yaml_ as any).default || yaml_;
 
 export default class Configuration {
 
