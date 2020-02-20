@@ -1,2 +1,7 @@
 defaults:
-  bar: baz
+  bar: defaults_bar
+  some:
+    foo: defaults_foo
+    array:
+      - defaults array
+      - next item

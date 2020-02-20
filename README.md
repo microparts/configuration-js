@@ -12,7 +12,7 @@ Library created for follow up corporate standards of application configuration.
 
 ```bash
 npm install --save @microparts/configuration-js
-
+// or
 yarn add @microparts/configuration-js
 ```
 
@@ -119,7 +119,7 @@ vue create vue-app
 ```
 2. Install this package
 ```bash
-yarn add @microparts/configuration-js
+npm install --save @microparts/configuration-js
 ```
 3. Put config files [like this](./example/vue-app/configuration)
 4. Change `vue.config.js` to build final config to global variables:
@@ -142,7 +142,9 @@ module.exports = {
   }
 };
 ```
+
 5. Add following code to `index.html` to **top** of `<head>` html tag (**before all scripts**):
+
 ```html
 <head>
   <% if (htmlWebpackPlugin.options.__stage === 'local') { %>
@@ -154,9 +156,20 @@ module.exports = {
   <% } %>
 <!-- ... meta tags and other code -->
 ```
-6. Run application.
+
+6. Add globals to `.eslintrc`:
+
+```json
+"globals": {
+  "__config": "readonly",
+  "__stage": "readonly",
+  "__vcs": "readonly"
+ },
+```
+
+7. Run application.
 ```bash
-yarn serve
+npm run serve
 ```
 
 Full example available at [here](./example/vue-app).

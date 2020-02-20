@@ -1,3 +1,6 @@
 local:
+  bar: local_bar
   some:
-    foo: bar
+    foo: local_foo
+    array:
+      - local array

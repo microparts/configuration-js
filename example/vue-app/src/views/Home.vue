@@ -1,8 +1,7 @@
 <template>
   <div class="home">
     CONFIGURATION EXAMPLE: <br>
-    {{ JSON.stringify(config) }}
-
+    <pre>{{ JSON.stringify(config, null, 2) }}</pre>
     <br><br>
     <img alt="Vue logo" src="../assets/logo.png">
     <HelloWorld msg="Welcome to Your Vue.js App"/>
@@ -14,14 +13,22 @@
 import HelloWorld from '@/components/HelloWorld.vue';
 
 export default {
-  name: 'home',
+  name: 'Home',
   computed: {
     config() {
       return __config;
-    }
+    },
   },
   components: {
     HelloWorld,
   },
 };
 </script>
+
+<style>
+  pre {
+    text-align: left;
+    white-space: pre;
+    font-family: monospace;
+  }
+</style>
