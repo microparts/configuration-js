@@ -832,14 +832,14 @@ var merge = new type('tag:yaml.org,2002:merge', {
   resolve: resolveYamlMerge
 });
 
-var commonjsGlobal = typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
+var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
 
 function commonjsRequire () {
 	throw new Error('Dynamic requires are not currently supported by rollup-plugin-commonjs');
 }
 
 function unwrapExports (x) {
-	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x.default : x;
+	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
 }
 
 function createCommonjsModule(fn, module) {
@@ -1330,6 +1330,8 @@ var PATTERN_TAG_HANDLE            = /^(?:!|!!|![a-z\-]+!)$/i;
 var PATTERN_TAG_URI               = /^(?:!|[^,\[\]\{\}])(?:%[0-9a-f]{2}|[0-9a-z\-#;\/\?:@&=\+\$,_\.!~\*'\(\)\[\]])*$/i;
 
 
+function _class(obj) { return Object.prototype.toString.call(obj); }
+
 function is_EOL(c) {
   return (c === 0x0A/* LF */) || (c === 0x0D/* CR */);
 }
@@ -1584,6 +1586,31 @@ function mergeMappings(state, destination, source, overridableKeys) {
 
 function storeMappingPair(state, _result, overridableKeys, keyTag, keyNode, valueNode, startLine, startPos) {
   var index, quantity;
+
+  // The output is a plain object here, so keys can only be strings.
+  // We need to convert keyNode to a string, but doing so can hang the process
+  // (deeply nested arrays that explode exponentially using aliases).
+  if (Array.isArray(keyNode)) {
+    keyNode = Array.prototype.slice.call(keyNode);
+
+    for (index = 0, quantity = keyNode.length; index < quantity; index += 1) {
+      if (Array.isArray(keyNode[index])) {
+        throwError(state, 'nested arrays are not supported inside keys');
+      }
+
+      if (typeof keyNode === 'object' && _class(keyNode[index]) === '[object Object]') {
+        keyNode[index] = '[object Object]';
+      }
+    }
+  }
+
+  // Avoid code execution in load() via toString property
+  // (still use its own toString for arrays, timestamps,
+  // and whatever user schema extensions happen to have @@toStringTag)
+  if (typeof keyNode === 'object' && _class(keyNode) === '[object Object]') {
+    keyNode = '[object Object]';
+  }
+
 
   keyNode = String(keyNode);
 
@@ -3639,7 +3666,7 @@ function writeNode(state, level, object, block, compact, iskey) {
         }
       }
     } else if (type === '[object Array]') {
-      var arrayLevel = (state.noArrayIndent) ? level - 1 : level;
+      var arrayLevel = (state.noArrayIndent && (level > 0)) ? level - 1 : level;
       if (block && (state.dump.length !== 0)) {
         writeBlockSequence(state, arrayLevel, state.dump, compact);
         if (duplicate) {
@@ -3800,31 +3827,20 @@ var yaml_ = /*#__PURE__*/Object.freeze({
 });
 
 var options = createCommonjsModule(function (module, exports) {
+var __assign = (commonjsGlobal && commonjsGlobal.__assign) || function () {
+    __assign = Object.assign || function(t) {
+        for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i];
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
+        }
+        return t;
+    };
+    return __assign.apply(this, arguments);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 function prepare(options) {
-    var opts = Object.assign({
-        cwd: process.cwd(),
-        deep: true,
-        ignore: [],
-        dot: false,
-        stats: false,
-        onlyFiles: true,
-        onlyDirectories: false,
-        followSymlinkedDirectories: true,
-        unique: true,
-        markDirectories: false,
-        absolute: false,
-        nobrace: false,
-        brace: true,
-        noglobstar: false,
-        globstar: true,
-        noext: false,
-        extension: true,
-        nocase: false,
-        case: true,
-        matchBase: false,
-        transform: null
-    }, options);
+    var opts = __assign({ cwd: process.cwd(), deep: true, ignore: [], dot: false, stats: false, onlyFiles: true, onlyDirectories: false, followSymlinkedDirectories: true, unique: true, markDirectories: false, absolute: false, nobrace: false, brace: true, noglobstar: false, globstar: true, noext: false, extension: true, nocase: false, case: true, matchBase: false, transform: null }, options);
     if (opts.onlyDirectories) {
         opts.onlyFiles = false;
     }
@@ -4057,27 +4073,6 @@ var globParent = function globParent(str) {
 };
 
 /*!
- * is-extglob <https://github.com/jonschlinkert/is-extglob>
- *
- * Copyright (c) 2014-2016, Jon Schlinkert.
- * Licensed under the MIT License.
- */
-
-var isExtglob$1 = function isExtglob(str) {
-  if (typeof str !== 'string' || str === '') {
-    return false;
-  }
-
-  var match;
-  while ((match = /(\\).|([@?!+*]\(.*\))/g.exec(str))) {
-    if (match[2]) return true;
-    str = str.slice(match.index + match[0].length);
-  }
-
-  return false;
-};
-
-/*!
  * is-glob <https://github.com/jonschlinkert/is-glob>
  *
  * Copyright (c) 2014-2017, Jon Schlinkert.
@@ -4086,22 +4081,24 @@ var isExtglob$1 = function isExtglob(str) {
 
 
 var chars = { '{': '}', '(': ')', '[': ']'};
+var strictRegex = /\\(.)|(^!|\*|[\].+)]\?|\[[^\\\]]+\]|\{[^\\}]+\}|\(\?[:!=][^\\)]+\)|\([^|]+\|[^\\)]+\))/;
+var relaxedRegex = /\\(.)|(^!|[*?{}()[\]]|\(\?)/;
 
 var isGlob$1 = function isGlob(str, options) {
   if (typeof str !== 'string' || str === '') {
     return false;
   }
 
-  if (isExtglob$1(str)) {
+  if (isExtglob(str)) {
     return true;
   }
 
-  var regex = /\\(.)|(^!|\*|[\].+)]\?|\[[^\\\]]+\]|\{[^\\}]+\}|\(\?[:!=][^\\)]+\)|\([^|]+\|[^\\)]+\))/;
+  var regex = strictRegex;
   var match;
 
   // optionally relax regex
   if (options && options.strict === false) {
-    regex = /\\(.)|(^!|[*?{}()[\]]|\(\?)/;
+    regex = relaxedRegex;
   }
 
   while ((match = regex.exec(str))) {
@@ -4762,7 +4759,7 @@ var kindOf = function kindOf(val) {
 };
 
 function ctorName(val) {
-  return val.constructor ? val.constructor.name : null;
+  return typeof val.constructor === 'function' ? val.constructor.name : null;
 }
 
 function isArray(val) {
@@ -4824,136 +4821,6 @@ function isBuffer(val) {
   return false;
 }
 
-var toString$1 = Object.prototype.toString;
-
-var kindOf$1 = function kindOf(val) {
-  if (val === void 0) return 'undefined';
-  if (val === null) return 'null';
-
-  var type = typeof val;
-  if (type === 'boolean') return 'boolean';
-  if (type === 'string') return 'string';
-  if (type === 'number') return 'number';
-  if (type === 'symbol') return 'symbol';
-  if (type === 'function') {
-    return isGeneratorFn$1(val) ? 'generatorfunction' : 'function';
-  }
-
-  if (isArray$1(val)) return 'array';
-  if (isBuffer$1(val)) return 'buffer';
-  if (isArguments$1(val)) return 'arguments';
-  if (isDate$1(val)) return 'date';
-  if (isError$1(val)) return 'error';
-  if (isRegexp$1(val)) return 'regexp';
-
-  switch (ctorName$1(val)) {
-    case 'Symbol': return 'symbol';
-    case 'Promise': return 'promise';
-
-    // Set, Map, WeakSet, WeakMap
-    case 'WeakMap': return 'weakmap';
-    case 'WeakSet': return 'weakset';
-    case 'Map': return 'map';
-    case 'Set': return 'set';
-
-    // 8-bit typed arrays
-    case 'Int8Array': return 'int8array';
-    case 'Uint8Array': return 'uint8array';
-    case 'Uint8ClampedArray': return 'uint8clampedarray';
-
-    // 16-bit typed arrays
-    case 'Int16Array': return 'int16array';
-    case 'Uint16Array': return 'uint16array';
-
-    // 32-bit typed arrays
-    case 'Int32Array': return 'int32array';
-    case 'Uint32Array': return 'uint32array';
-    case 'Float32Array': return 'float32array';
-    case 'Float64Array': return 'float64array';
-  }
-
-  if (isGeneratorObj$1(val)) {
-    return 'generator';
-  }
-
-  // Non-plain objects
-  type = toString$1.call(val);
-  switch (type) {
-    case '[object Object]': return 'object';
-    // iterators
-    case '[object Map Iterator]': return 'mapiterator';
-    case '[object Set Iterator]': return 'setiterator';
-    case '[object String Iterator]': return 'stringiterator';
-    case '[object Array Iterator]': return 'arrayiterator';
-  }
-
-  // other
-  return type.slice(8, -1).toLowerCase().replace(/\s/g, '');
-};
-
-function ctorName$1(val) {
-  return val.constructor ? val.constructor.name : null;
-}
-
-function isArray$1(val) {
-  if (Array.isArray) return Array.isArray(val);
-  return val instanceof Array;
-}
-
-function isError$1(val) {
-  return val instanceof Error || (typeof val.message === 'string' && val.constructor && typeof val.constructor.stackTraceLimit === 'number');
-}
-
-function isDate$1(val) {
-  if (val instanceof Date) return true;
-  return typeof val.toDateString === 'function'
-    && typeof val.getDate === 'function'
-    && typeof val.setDate === 'function';
-}
-
-function isRegexp$1(val) {
-  if (val instanceof RegExp) return true;
-  return typeof val.flags === 'string'
-    && typeof val.ignoreCase === 'boolean'
-    && typeof val.multiline === 'boolean'
-    && typeof val.global === 'boolean';
-}
-
-function isGeneratorFn$1(name, val) {
-  return ctorName$1(name) === 'GeneratorFunction';
-}
-
-function isGeneratorObj$1(val) {
-  return typeof val.throw === 'function'
-    && typeof val.return === 'function'
-    && typeof val.next === 'function';
-}
-
-function isArguments$1(val) {
-  try {
-    if (typeof val.length === 'number' && typeof val.callee === 'function') {
-      return true;
-    }
-  } catch (err) {
-    if (err.message.indexOf('callee') !== -1) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * If you need to support Safari 5-7 (8-10 yr-old browser),
- * take a look at https://github.com/feross/is-buffer
- */
-
-function isBuffer$1(val) {
-  if (val.constructor && typeof val.constructor.isBuffer === 'function') {
-    return val.constructor.isBuffer(val);
-  }
-  return false;
-}
-
 // accessor descriptor properties
 var accessor = {
   get: 'function',
@@ -4968,7 +4835,7 @@ function isAccessorDescriptor(obj, prop) {
     return typeof val !== 'undefined';
   }
 
-  if (kindOf$1(obj) !== 'object') {
+  if (kindOf(obj) !== 'object') {
     return false;
   }
 
@@ -4992,7 +4859,7 @@ function isAccessorDescriptor(obj, prop) {
       continue;
     }
 
-    if (kindOf$1(obj[key]) === accessor[key]) {
+    if (kindOf(obj[key]) === accessor[key]) {
       continue;
     }
 
@@ -5013,136 +4880,6 @@ function has(obj, key) {
 
 var isAccessorDescriptor_1 = isAccessorDescriptor;
 
-var toString$2 = Object.prototype.toString;
-
-var kindOf$2 = function kindOf(val) {
-  if (val === void 0) return 'undefined';
-  if (val === null) return 'null';
-
-  var type = typeof val;
-  if (type === 'boolean') return 'boolean';
-  if (type === 'string') return 'string';
-  if (type === 'number') return 'number';
-  if (type === 'symbol') return 'symbol';
-  if (type === 'function') {
-    return isGeneratorFn$2(val) ? 'generatorfunction' : 'function';
-  }
-
-  if (isArray$2(val)) return 'array';
-  if (isBuffer$2(val)) return 'buffer';
-  if (isArguments$2(val)) return 'arguments';
-  if (isDate$2(val)) return 'date';
-  if (isError$2(val)) return 'error';
-  if (isRegexp$2(val)) return 'regexp';
-
-  switch (ctorName$2(val)) {
-    case 'Symbol': return 'symbol';
-    case 'Promise': return 'promise';
-
-    // Set, Map, WeakSet, WeakMap
-    case 'WeakMap': return 'weakmap';
-    case 'WeakSet': return 'weakset';
-    case 'Map': return 'map';
-    case 'Set': return 'set';
-
-    // 8-bit typed arrays
-    case 'Int8Array': return 'int8array';
-    case 'Uint8Array': return 'uint8array';
-    case 'Uint8ClampedArray': return 'uint8clampedarray';
-
-    // 16-bit typed arrays
-    case 'Int16Array': return 'int16array';
-    case 'Uint16Array': return 'uint16array';
-
-    // 32-bit typed arrays
-    case 'Int32Array': return 'int32array';
-    case 'Uint32Array': return 'uint32array';
-    case 'Float32Array': return 'float32array';
-    case 'Float64Array': return 'float64array';
-  }
-
-  if (isGeneratorObj$2(val)) {
-    return 'generator';
-  }
-
-  // Non-plain objects
-  type = toString$2.call(val);
-  switch (type) {
-    case '[object Object]': return 'object';
-    // iterators
-    case '[object Map Iterator]': return 'mapiterator';
-    case '[object Set Iterator]': return 'setiterator';
-    case '[object String Iterator]': return 'stringiterator';
-    case '[object Array Iterator]': return 'arrayiterator';
-  }
-
-  // other
-  return type.slice(8, -1).toLowerCase().replace(/\s/g, '');
-};
-
-function ctorName$2(val) {
-  return val.constructor ? val.constructor.name : null;
-}
-
-function isArray$2(val) {
-  if (Array.isArray) return Array.isArray(val);
-  return val instanceof Array;
-}
-
-function isError$2(val) {
-  return val instanceof Error || (typeof val.message === 'string' && val.constructor && typeof val.constructor.stackTraceLimit === 'number');
-}
-
-function isDate$2(val) {
-  if (val instanceof Date) return true;
-  return typeof val.toDateString === 'function'
-    && typeof val.getDate === 'function'
-    && typeof val.setDate === 'function';
-}
-
-function isRegexp$2(val) {
-  if (val instanceof RegExp) return true;
-  return typeof val.flags === 'string'
-    && typeof val.ignoreCase === 'boolean'
-    && typeof val.multiline === 'boolean'
-    && typeof val.global === 'boolean';
-}
-
-function isGeneratorFn$2(name, val) {
-  return ctorName$2(name) === 'GeneratorFunction';
-}
-
-function isGeneratorObj$2(val) {
-  return typeof val.throw === 'function'
-    && typeof val.return === 'function'
-    && typeof val.next === 'function';
-}
-
-function isArguments$2(val) {
-  try {
-    if (typeof val.length === 'number' && typeof val.callee === 'function') {
-      return true;
-    }
-  } catch (err) {
-    if (err.message.indexOf('callee') !== -1) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * If you need to support Safari 5-7 (8-10 yr-old browser),
- * take a look at https://github.com/feross/is-buffer
- */
-
-function isBuffer$2(val) {
-  if (val.constructor && typeof val.constructor.isBuffer === 'function') {
-    return val.constructor.isBuffer(val);
-  }
-  return false;
-}
-
 var isDataDescriptor = function isDataDescriptor(obj, prop) {
   // data descriptor properties
   var data = {
@@ -5151,7 +4888,7 @@ var isDataDescriptor = function isDataDescriptor(obj, prop) {
     writable: 'boolean'
   };
 
-  if (kindOf$2(obj) !== 'object') {
+  if (kindOf(obj) !== 'object') {
     return false;
   }
 
@@ -5171,7 +4908,7 @@ var isDataDescriptor = function isDataDescriptor(obj, prop) {
       continue;
     }
 
-    if (kindOf$2(obj[key]) === data[key]) {
+    if (kindOf(obj[key]) === data[key]) {
       continue;
     }
 
@@ -5342,62 +5079,6 @@ function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-var isExtendable$1 = function isExtendable(val) {
-  return isPlainObject(val) || typeof val === 'function' || Array.isArray(val);
-};
-
-var extendShallow$1 = Object.assign || function(obj/*, objects*/) {
-  if (obj === null || typeof obj === 'undefined') {
-    throw new TypeError('Cannot convert undefined or null to object');
-  }
-  if (!isObject$2(obj)) {
-    obj = {};
-  }
-  for (var i = 1; i < arguments.length; i++) {
-    var val = arguments[i];
-    if (isString$1(val)) {
-      val = toObject$1(val);
-    }
-    if (isObject$2(val)) {
-      assign$1(obj, val);
-      assignSymbols(obj, val);
-    }
-  }
-  return obj;
-};
-
-function assign$1(a, b) {
-  for (var key in b) {
-    if (hasOwn$1(b, key)) {
-      a[key] = b[key];
-    }
-  }
-}
-
-function isString$1(val) {
-  return (val && typeof val === 'string');
-}
-
-function toObject$1(str) {
-  var obj = {};
-  for (var i in str) {
-    obj[i] = str[i];
-  }
-  return obj;
-}
-
-function isObject$2(val) {
-  return (val && typeof val === 'object') || isExtendable$1(val);
-}
-
-/**
- * Returns true if the given `key` is an own property of `obj`.
- */
-
-function hasOwn$1(obj, key) {
-  return Object.prototype.hasOwnProperty.call(obj, key);
-}
-
 /**
  * The main export is a function that takes a `pattern` string and an `options` object.
  *
@@ -5436,7 +5117,7 @@ toRegex.create = function(pattern, options) {
     throw new TypeError('expected a string');
   }
 
-  var opts = extendShallow$1({}, options);
+  var opts = extendShallow({}, options);
   if (opts.contains === true) {
     opts.strictNegate = false;
   }
@@ -5663,28 +5344,28 @@ var arrayUnique_1 = arrayUnique.immutable;
  * Licensed under the MIT License.
  */
 
-var isExtendable$2 = function isExtendable(val) {
+var isExtendable$1 = function isExtendable(val) {
   return typeof val !== 'undefined' && val !== null
     && (typeof val === 'object' || typeof val === 'function');
 };
 
-var extendShallow$2 = function extend(o/*, objects*/) {
-  if (!isExtendable$2(o)) { o = {}; }
+var extendShallow$1 = function extend(o/*, objects*/) {
+  if (!isExtendable$1(o)) { o = {}; }
 
   var len = arguments.length;
   for (var i = 1; i < len; i++) {
     var obj = arguments[i];
 
-    if (isExtendable$2(obj)) {
-      assign$2(o, obj);
+    if (isExtendable$1(obj)) {
+      assign$1(o, obj);
     }
   }
   return o;
 };
 
-function assign$2(a, b) {
+function assign$1(a, b) {
   for (var key in b) {
-    if (hasOwn$2(b, key)) {
+    if (hasOwn$1(b, key)) {
       a[key] = b[key];
     }
   }
@@ -5694,63 +5375,7 @@ function assign$2(a, b) {
  * Returns true if the given `key` is an own property of `obj`.
  */
 
-function hasOwn$2(obj, key) {
-  return Object.prototype.hasOwnProperty.call(obj, key);
-}
-
-var isExtendable$3 = function isExtendable(val) {
-  return isPlainObject(val) || typeof val === 'function' || Array.isArray(val);
-};
-
-var extendShallow$3 = Object.assign || function(obj/*, objects*/) {
-  if (obj === null || typeof obj === 'undefined') {
-    throw new TypeError('Cannot convert undefined or null to object');
-  }
-  if (!isObject$3(obj)) {
-    obj = {};
-  }
-  for (var i = 1; i < arguments.length; i++) {
-    var val = arguments[i];
-    if (isString$2(val)) {
-      val = toObject$2(val);
-    }
-    if (isObject$3(val)) {
-      assign$3(obj, val);
-      assignSymbols(obj, val);
-    }
-  }
-  return obj;
-};
-
-function assign$3(a, b) {
-  for (var key in b) {
-    if (hasOwn$3(b, key)) {
-      a[key] = b[key];
-    }
-  }
-}
-
-function isString$2(val) {
-  return (val && typeof val === 'string');
-}
-
-function toObject$2(str) {
-  var obj = {};
-  for (var i in str) {
-    obj[i] = str[i];
-  }
-  return obj;
-}
-
-function isObject$3(val) {
-  return (val && typeof val === 'object') || isExtendable$3(val);
-}
-
-/**
- * Returns true if the given `key` is an own property of `obj`.
- */
-
-function hasOwn$3(obj, key) {
+function hasOwn$1(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
@@ -5769,7 +5394,7 @@ var splitString = function(str, options, fn) {
     options = { sep: options };
   }
 
-  var opts = extendShallow$3({sep: '.'}, options);
+  var opts = extendShallow({sep: '.'}, options);
   var quotes = opts.quotes || ['"', "'", '`'];
   var brackets;
 
@@ -5946,19 +5571,19 @@ function flat(arr, res) {
 // The _isBuffer check is for Safari 5-7 support, because it's missing
 // Object.prototype.constructor. Remove this eventually
 var isBuffer_1 = function (obj) {
-  return obj != null && (isBuffer$3(obj) || isSlowBuffer(obj) || !!obj._isBuffer)
+  return obj != null && (isBuffer$1(obj) || isSlowBuffer(obj) || !!obj._isBuffer)
 };
 
-function isBuffer$3 (obj) {
+function isBuffer$1 (obj) {
   return !!obj.constructor && typeof obj.constructor.isBuffer === 'function' && obj.constructor.isBuffer(obj)
 }
 
 // For Node v0.10 support. Remove this eventually.
 function isSlowBuffer (obj) {
-  return typeof obj.readFloatLE === 'function' && typeof obj.slice === 'function' && isBuffer$3(obj.slice(0, 0))
+  return typeof obj.readFloatLE === 'function' && typeof obj.slice === 'function' && isBuffer$1(obj.slice(0, 0))
 }
 
-var toString$3 = Object.prototype.toString;
+var toString$1 = Object.prototype.toString;
 
 /**
  * Get the native `typeof` a value.
@@ -5967,7 +5592,7 @@ var toString$3 = Object.prototype.toString;
  * @return {*} Native javascript type
  */
 
-var kindOf$3 = function kindOf(val) {
+var kindOf$1 = function kindOf(val) {
   // primitivies
   if (typeof val === 'undefined') {
     return 'undefined';
@@ -6004,7 +5629,7 @@ var kindOf$3 = function kindOf(val) {
   }
 
   // other objects
-  var type = toString$3.call(val);
+  var type = toString$1.call(val);
 
   if (type === '[object RegExp]') {
     return 'regexp';
@@ -6075,7 +5700,7 @@ var kindOf$3 = function kindOf(val) {
 };
 
 var isNumber = function isNumber(num) {
-  var type = kindOf$3(num);
+  var type = kindOf$1(num);
 
   if (type === 'string') {
     if (!num.trim()) return false;
@@ -6086,35 +5711,23 @@ var isNumber = function isNumber(num) {
   return (num - num + 1) >= 0;
 };
 
-/*!
- * is-extendable <https://github.com/jonschlinkert/is-extendable>
- *
- * Copyright (c) 2015, Jon Schlinkert.
- * Licensed under the MIT License.
- */
-
-var isExtendable$4 = function isExtendable(val) {
-  return typeof val !== 'undefined' && val !== null
-    && (typeof val === 'object' || typeof val === 'function');
-};
-
-var extendShallow$4 = function extend(o/*, objects*/) {
-  if (!isExtendable$4(o)) { o = {}; }
+var extendShallow$2 = function extend(o/*, objects*/) {
+  if (!isExtendable$1(o)) { o = {}; }
 
   var len = arguments.length;
   for (var i = 1; i < len; i++) {
     var obj = arguments[i];
 
-    if (isExtendable$4(obj)) {
-      assign$4(o, obj);
+    if (isExtendable$1(obj)) {
+      assign$2(o, obj);
     }
   }
   return o;
 };
 
-function assign$4(a, b) {
+function assign$2(a, b) {
   for (var key in b) {
-    if (hasOwn$4(b, key)) {
+    if (hasOwn$2(b, key)) {
       a[key] = b[key];
     }
   }
@@ -6124,7 +5737,7 @@ function assign$4(a, b) {
  * Returns true if the given `key` is an own property of `obj`.
  */
 
-function hasOwn$4(obj, key) {
+function hasOwn$2(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
@@ -6514,7 +6127,7 @@ function fillRange(start, stop, step, options) {
     options = { transform: options };
   }
 
-  var opts = extendShallow$4({step: step}, options);
+  var opts = extendShallow$2({step: step}, options);
   if (opts.step && !isValidNumber(opts.step)) {
     if (opts.strictRanges === true) {
       throw new TypeError('expected options.step to be a number');
@@ -6701,7 +6314,7 @@ var utils = module.exports;
  * Module dependencies
  */
 
-utils.extend = extendShallow$2;
+utils.extend = extendShallow$1;
 utils.flatten = arrFlatten;
 utils.isObject = isobject;
 utils.fillRange = fillRange_1;
@@ -7310,6 +6923,114 @@ function hasQueue(node) {
   return Array.isArray(node.queue) && node.queue.length;
 }
 
+// accessor descriptor properties
+var accessor$1 = {
+  get: 'function',
+  set: 'function',
+  configurable: 'boolean',
+  enumerable: 'boolean'
+};
+
+function isAccessorDescriptor$1(obj, prop) {
+  if (typeof prop === 'string') {
+    var val = Object.getOwnPropertyDescriptor(obj, prop);
+    return typeof val !== 'undefined';
+  }
+
+  if (kindOf(obj) !== 'object') {
+    return false;
+  }
+
+  if (has$1(obj, 'value') || has$1(obj, 'writable')) {
+    return false;
+  }
+
+  if (!has$1(obj, 'get') || typeof obj.get !== 'function') {
+    return false;
+  }
+
+  // tldr: it's valid to have "set" be undefined
+  // "set" might be undefined if `Object.getOwnPropertyDescriptor`
+  // was used to get the value, and only `get` was defined by the user
+  if (has$1(obj, 'set') && typeof obj[key] !== 'function' && typeof obj[key] !== 'undefined') {
+    return false;
+  }
+
+  for (var key in obj) {
+    if (!accessor$1.hasOwnProperty(key)) {
+      continue;
+    }
+
+    if (kindOf(obj[key]) === accessor$1[key]) {
+      continue;
+    }
+
+    if (typeof obj[key] !== 'undefined') {
+      return false;
+    }
+  }
+  return true;
+}
+
+function has$1(obj, key) {
+  return {}.hasOwnProperty.call(obj, key);
+}
+
+/**
+ * Expose `isAccessorDescriptor`
+ */
+
+var isAccessorDescriptor_1$1 = isAccessorDescriptor$1;
+
+var isDataDescriptor$1 = function isDataDescriptor(obj, prop) {
+  // data descriptor properties
+  var data = {
+    configurable: 'boolean',
+    enumerable: 'boolean',
+    writable: 'boolean'
+  };
+
+  if (kindOf(obj) !== 'object') {
+    return false;
+  }
+
+  if (typeof prop === 'string') {
+    var val = Object.getOwnPropertyDescriptor(obj, prop);
+    return typeof val !== 'undefined';
+  }
+
+  if (!('value' in obj) && !('writable' in obj)) {
+    return false;
+  }
+
+  for (var key in obj) {
+    if (key === 'value') continue;
+
+    if (!data.hasOwnProperty(key)) {
+      continue;
+    }
+
+    if (kindOf(obj[key]) === data[key]) {
+      continue;
+    }
+
+    if (typeof obj[key] !== 'undefined') {
+      return false;
+    }
+  }
+  return true;
+};
+
+var isDescriptor$1 = function isDescriptor(obj, key) {
+  if (kindOf(obj) !== 'object') {
+    return false;
+  }
+  if ('get' in obj) {
+    return isAccessorDescriptor_1$1(obj, key);
+  }
+  return isDataDescriptor$1(obj, key);
+};
+
 var defineProperty$1 = function defineProperty(obj, prop, val) {
   if (typeof obj !== 'object' && typeof obj !== 'function') {
     throw new TypeError('expected an object or function.');
@@ -7319,7 +7040,7 @@ var defineProperty$1 = function defineProperty(obj, prop, val) {
     throw new TypeError('expected `prop` to be a string.');
   }
 
-  if (isDescriptor(val) && ('set' in val || 'get' in val)) {
+  if (isDescriptor$1(val) && ('set' in val || 'get' in val)) {
     return Object.defineProperty(obj, prop, val);
   }
 
@@ -7329,6 +7050,122 @@ var defineProperty$1 = function defineProperty(obj, prop, val) {
     writable: true,
     value: val
   });
+};
+
+var toString$2 = Object.prototype.toString;
+
+/**
+ * Get the native `typeof` a value.
+ *
+ * @param  {*} `val`
+ * @return {*} Native javascript type
+ */
+
+var kindOf$2 = function kindOf(val) {
+  // primitivies
+  if (typeof val === 'undefined') {
+    return 'undefined';
+  }
+  if (val === null) {
+    return 'null';
+  }
+  if (val === true || val === false || val instanceof Boolean) {
+    return 'boolean';
+  }
+  if (typeof val === 'string' || val instanceof String) {
+    return 'string';
+  }
+  if (typeof val === 'number' || val instanceof Number) {
+    return 'number';
+  }
+
+  // functions
+  if (typeof val === 'function' || val instanceof Function) {
+    return 'function';
+  }
+
+  // array
+  if (typeof Array.isArray !== 'undefined' && Array.isArray(val)) {
+    return 'array';
+  }
+
+  // check for instances of RegExp and Date before calling `toString`
+  if (val instanceof RegExp) {
+    return 'regexp';
+  }
+  if (val instanceof Date) {
+    return 'date';
+  }
+
+  // other objects
+  var type = toString$2.call(val);
+
+  if (type === '[object RegExp]') {
+    return 'regexp';
+  }
+  if (type === '[object Date]') {
+    return 'date';
+  }
+  if (type === '[object Arguments]') {
+    return 'arguments';
+  }
+  if (type === '[object Error]') {
+    return 'error';
+  }
+
+  // buffer
+  if (isBuffer_1(val)) {
+    return 'buffer';
+  }
+
+  // es6: Map, WeakMap, Set, WeakSet
+  if (type === '[object Set]') {
+    return 'set';
+  }
+  if (type === '[object WeakSet]') {
+    return 'weakset';
+  }
+  if (type === '[object Map]') {
+    return 'map';
+  }
+  if (type === '[object WeakMap]') {
+    return 'weakmap';
+  }
+  if (type === '[object Symbol]') {
+    return 'symbol';
+  }
+
+  // typed arrays
+  if (type === '[object Int8Array]') {
+    return 'int8array';
+  }
+  if (type === '[object Uint8Array]') {
+    return 'uint8array';
+  }
+  if (type === '[object Uint8ClampedArray]') {
+    return 'uint8clampedarray';
+  }
+  if (type === '[object Int16Array]') {
+    return 'int16array';
+  }
+  if (type === '[object Uint16Array]') {
+    return 'uint16array';
+  }
+  if (type === '[object Int32Array]') {
+    return 'int32array';
+  }
+  if (type === '[object Uint32Array]') {
+    return 'uint32array';
+  }
+  if (type === '[object Float32Array]') {
+    return 'float32array';
+  }
+  if (type === '[object Float64Array]') {
+    return 'float64array';
+  }
+
+  // must be a plain object
+  return 'object';
 };
 
 var snapdragonUtil = createCommonjsModule(function (module) {
@@ -7351,7 +7188,7 @@ var utils = module.exports;
  */
 
 utils.isNode = function(node) {
-  return kindOf$3(node) === 'object' && node.isNode === true;
+  return kindOf$2(node) === 'object' && node.isNode === true;
 };
 
 /**
@@ -7774,7 +7611,7 @@ utils.removeNode = function(parent, node) {
 
 utils.isType = function(node, type) {
   assert(utils.isNode(node), 'expected node to be an instance of Node');
-  switch (kindOf$3(type)) {
+  switch (kindOf$2(type)) {
     case 'array':
       var types = type.slice();
       for (var i = 0; i < types.length; i++) {
@@ -8214,7 +8051,7 @@ utils.isInside = function(state, node, type) {
     return (parent && parent.type === type) || utils.isInsideType(state, type);
   }
 
-  if (kindOf$3(type) === 'regexp') {
+  if (kindOf$2(type) === 'regexp') {
     if (parent && parent.type && type.test(parent.type)) {
       return true;
     }
@@ -8305,7 +8142,7 @@ utils.trim = function(str) {
  */
 
 function isObject(val) {
-  return kindOf$3(val) === 'object';
+  return kindOf$2(val) === 'object';
 }
 
 /**
@@ -9202,6 +9039,114 @@ function concatNodes(pos, node, parent, options) {
   prev.push(node);
 }
 
+// accessor descriptor properties
+var accessor$2 = {
+  get: 'function',
+  set: 'function',
+  configurable: 'boolean',
+  enumerable: 'boolean'
+};
+
+function isAccessorDescriptor$2(obj, prop) {
+  if (typeof prop === 'string') {
+    var val = Object.getOwnPropertyDescriptor(obj, prop);
+    return typeof val !== 'undefined';
+  }
+
+  if (kindOf(obj) !== 'object') {
+    return false;
+  }
+
+  if (has$2(obj, 'value') || has$2(obj, 'writable')) {
+    return false;
+  }
+
+  if (!has$2(obj, 'get') || typeof obj.get !== 'function') {
+    return false;
+  }
+
+  // tldr: it's valid to have "set" be undefined
+  // "set" might be undefined if `Object.getOwnPropertyDescriptor`
+  // was used to get the value, and only `get` was defined by the user
+  if (has$2(obj, 'set') && typeof obj[key] !== 'function' && typeof obj[key] !== 'undefined') {
+    return false;
+  }
+
+  for (var key in obj) {
+    if (!accessor$2.hasOwnProperty(key)) {
+      continue;
+    }
+
+    if (kindOf(obj[key]) === accessor$2[key]) {
+      continue;
+    }
+
+    if (typeof obj[key] !== 'undefined') {
+      return false;
+    }
+  }
+  return true;
+}
+
+function has$2(obj, key) {
+  return {}.hasOwnProperty.call(obj, key);
+}
+
+/**
+ * Expose `isAccessorDescriptor`
+ */
+
+var isAccessorDescriptor_1$2 = isAccessorDescriptor$2;
+
+var isDataDescriptor$2 = function isDataDescriptor(obj, prop) {
+  // data descriptor properties
+  var data = {
+    configurable: 'boolean',
+    enumerable: 'boolean',
+    writable: 'boolean'
+  };
+
+  if (kindOf(obj) !== 'object') {
+    return false;
+  }
+
+  if (typeof prop === 'string') {
+    var val = Object.getOwnPropertyDescriptor(obj, prop);
+    return typeof val !== 'undefined';
+  }
+
+  if (!('value' in obj) && !('writable' in obj)) {
+    return false;
+  }
+
+  for (var key in obj) {
+    if (key === 'value') continue;
+
+    if (!data.hasOwnProperty(key)) {
+      continue;
+    }
+
+    if (kindOf(obj[key]) === data[key]) {
+      continue;
+    }
+
+    if (typeof obj[key] !== 'undefined') {
+      return false;
+    }
+  }
+  return true;
+};
+
+var isDescriptor$2 = function isDescriptor(obj, key) {
+  if (kindOf(obj) !== 'object') {
+    return false;
+  }
+  if ('get' in obj) {
+    return isAccessorDescriptor_1$2(obj, key);
+  }
+  return isDataDescriptor$2(obj, key);
+};
+
 var defineProperty$2 = function defineProperty(obj, prop, val) {
   if (typeof obj !== 'object' && typeof obj !== 'function') {
     throw new TypeError('expected an object or function.');
@@ -9211,7 +9156,7 @@ var defineProperty$2 = function defineProperty(obj, prop, val) {
     throw new TypeError('expected `prop` to be a string.');
   }
 
-  if (isDescriptor(val) && ('set' in val || 'get' in val)) {
+  if (isDescriptor$2(val) && ('set' in val || 'get' in val)) {
     return Object.defineProperty(obj, prop, val);
   }
 
@@ -9335,6 +9280,13 @@ Emitter.prototype.removeEventListener = function(event, fn){
       break;
     }
   }
+
+  // Remove event specific arrays for event types that no
+  // one is subscribed for to avoid memory leak.
+  if (callbacks.length === 0) {
+    delete this._callbacks['$' + event];
+  }
+
   return this;
 };
 
@@ -9348,8 +9300,13 @@ Emitter.prototype.removeEventListener = function(event, fn){
 
 Emitter.prototype.emit = function(event){
   this._callbacks = this._callbacks || {};
-  var args = [].slice.call(arguments, 1)
+
+  var args = new Array(arguments.length - 1)
     , callbacks = this._callbacks['$' + event];
+
+  for (var i = 1; i < arguments.length; i++) {
+    args[i - 1] = arguments[i];
+  }
 
   if (callbacks) {
     callbacks = callbacks.slice(0);
@@ -9419,7 +9376,7 @@ var objectVisit = function visit(thisArg, method, target, val) {
  */
 
 var mapVisit = function mapVisit(collection, method, val) {
-  if (isObject$4(val)) {
+  if (isObject$2(val)) {
     return objectVisit.apply(null, arguments);
   }
 
@@ -9431,7 +9388,7 @@ var mapVisit = function mapVisit(collection, method, val) {
 
   for (var i = 0; i < val.length; i++) {
     var ele = val[i];
-    if (isObject$4(ele)) {
+    if (isObject$2(ele)) {
       objectVisit.apply(null, [collection, method, ele].concat(args));
     } else {
       collection[method].apply(collection, [ele].concat(args));
@@ -9439,7 +9396,7 @@ var mapVisit = function mapVisit(collection, method, val) {
   }
 };
 
-function isObject$4(val) {
+function isObject$2(val) {
   return val && (typeof val === 'function' || (!Array.isArray(val) && typeof val === 'object'));
 }
 
@@ -9460,6 +9417,122 @@ var collectionVisit = function(collection, method, val) {
   }
 
   return collection;
+};
+
+var toString$3 = Object.prototype.toString;
+
+/**
+ * Get the native `typeof` a value.
+ *
+ * @param  {*} `val`
+ * @return {*} Native javascript type
+ */
+
+var kindOf$3 = function kindOf(val) {
+  // primitivies
+  if (typeof val === 'undefined') {
+    return 'undefined';
+  }
+  if (val === null) {
+    return 'null';
+  }
+  if (val === true || val === false || val instanceof Boolean) {
+    return 'boolean';
+  }
+  if (typeof val === 'string' || val instanceof String) {
+    return 'string';
+  }
+  if (typeof val === 'number' || val instanceof Number) {
+    return 'number';
+  }
+
+  // functions
+  if (typeof val === 'function' || val instanceof Function) {
+    return 'function';
+  }
+
+  // array
+  if (typeof Array.isArray !== 'undefined' && Array.isArray(val)) {
+    return 'array';
+  }
+
+  // check for instances of RegExp and Date before calling `toString`
+  if (val instanceof RegExp) {
+    return 'regexp';
+  }
+  if (val instanceof Date) {
+    return 'date';
+  }
+
+  // other objects
+  var type = toString$3.call(val);
+
+  if (type === '[object RegExp]') {
+    return 'regexp';
+  }
+  if (type === '[object Date]') {
+    return 'date';
+  }
+  if (type === '[object Arguments]') {
+    return 'arguments';
+  }
+  if (type === '[object Error]') {
+    return 'error';
+  }
+
+  // buffer
+  if (isBuffer_1(val)) {
+    return 'buffer';
+  }
+
+  // es6: Map, WeakMap, Set, WeakSet
+  if (type === '[object Set]') {
+    return 'set';
+  }
+  if (type === '[object WeakSet]') {
+    return 'weakset';
+  }
+  if (type === '[object Map]') {
+    return 'map';
+  }
+  if (type === '[object WeakMap]') {
+    return 'weakmap';
+  }
+  if (type === '[object Symbol]') {
+    return 'symbol';
+  }
+
+  // typed arrays
+  if (type === '[object Int8Array]') {
+    return 'int8array';
+  }
+  if (type === '[object Uint8Array]') {
+    return 'uint8array';
+  }
+  if (type === '[object Uint8ClampedArray]') {
+    return 'uint8clampedarray';
+  }
+  if (type === '[object Int16Array]') {
+    return 'int16array';
+  }
+  if (type === '[object Uint16Array]') {
+    return 'uint16array';
+  }
+  if (type === '[object Int32Array]') {
+    return 'int32array';
+  }
+  if (type === '[object Uint32Array]') {
+    return 'uint32array';
+  }
+  if (type === '[object Float32Array]') {
+    return 'float32array';
+  }
+  if (type === '[object Float64Array]') {
+    return 'float64array';
+  }
+
+  // must be a plain object
+  return 'object';
 };
 
 var toObjectPath = function toPath(args) {
@@ -9484,18 +9557,6 @@ function filter(arr) {
   }
   return res;
 }
-
-/*!
- * is-extendable <https://github.com/jonschlinkert/is-extendable>
- *
- * Copyright (c) 2015, Jon Schlinkert.
- * Licensed under the MIT License.
- */
-
-var isExtendable$5 = function isExtendable(val) {
-  return typeof val !== 'undefined' && val !== null
-    && (typeof val === 'object' || typeof val === 'function');
-};
 
 var arrUnion = function union(init) {
   if (!Array.isArray(init)) {
@@ -9533,7 +9594,7 @@ var arrUnion = function union(init) {
  */
 
 var getValue = function(obj, prop, a, b, c) {
-  if (!isObject$5(obj) || !prop) {
+  if (!isObject$3(obj) || !prop) {
     return obj;
   }
 
@@ -9564,7 +9625,7 @@ var getValue = function(obj, prop, a, b, c) {
   return obj;
 };
 
-function isObject$5(val) {
+function isObject$3(val) {
   return val !== null && (typeof val === 'object' || typeof val === 'function');
 }
 
@@ -9576,23 +9637,23 @@ function toString$4(val) {
   return val;
 }
 
-var extendShallow$5 = function extend(o/*, objects*/) {
-  if (!isExtendable$5(o)) { o = {}; }
+var extendShallow$3 = function extend(o/*, objects*/) {
+  if (!isExtendable$1(o)) { o = {}; }
 
   var len = arguments.length;
   for (var i = 1; i < len; i++) {
     var obj = arguments[i];
 
-    if (isExtendable$5(obj)) {
-      assign$5(o, obj);
+    if (isExtendable$1(obj)) {
+      assign$3(o, obj);
     }
   }
   return o;
 };
 
-function assign$5(a, b) {
+function assign$3(a, b) {
   for (var key in b) {
-    if (hasOwn$5(b, key)) {
+    if (hasOwn$3(b, key)) {
       a[key] = b[key];
     }
   }
@@ -9602,61 +9663,54 @@ function assign$5(a, b) {
  * Returns true if the given `key` is an own property of `obj`.
  */
 
-function hasOwn$5(obj, key) {
+function hasOwn$3(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-var setValue = function(obj, path$$1, val) {
-  if (!isExtendable$5(obj)) {
+var setValue = function(obj, prop, val) {
+  if (!isExtendable$1(obj)) {
     return obj;
   }
 
-  if (Array.isArray(path$$1)) {
-    path$$1 = toObjectPath(path$$1);
+  if (Array.isArray(prop)) {
+    prop = [].concat.apply([], prop).join('.');
   }
 
-  if (typeof path$$1 !== 'string') {
+  if (typeof prop !== 'string') {
     return obj;
   }
 
-  var segs = path$$1.split('.');
-  var len = segs.length, i = -1;
-  var res = obj;
-  var last;
+  var keys = splitString(prop, {sep: '.', brackets: true}).filter(isValidKey);
+  var len = keys.length;
+  var idx = -1;
+  var current = obj;
 
-  while (++i < len) {
-    var key = segs[i];
-
-    while (key[key.length - 1] === '\\') {
-      key = key.slice(0, -1) + '.' + segs[++i];
+  while (++idx < len) {
+    var key = keys[idx];
+    if (idx !== len - 1) {
+      if (!isExtendable$1(current[key])) {
+        current[key] = {};
+      }
+      current = current[key];
+      continue;
     }
 
-    if (i === len - 1) {
-      last = key;
-      break;
-    }
-
-    if (!isExtendable$5(obj[key])) {
-      obj[key] = {};
-    }
-    obj = obj[key];
-  }
-
-  if (obj.hasOwnProperty(last) && isExtendable$5(obj[last])) {
-    if (isPlainObject(val)) {
-      extendShallow$5(obj[last], val);
+    if (isPlainObject(current[key]) && isPlainObject(val)) {
+      current[key] = extendShallow$3({}, current[key], val);
     } else {
-      obj[last] = val;
+      current[key] = val;
     }
-
-  } else {
-    obj[last] = val;
   }
-  return res;
+
+  return obj;
 };
 
+function isValidKey(key) {
+  return key !== '__proto__' && key !== 'constructor' && key !== 'prototype';
+}
+
 var unionValue = function unionValue(obj, prop, value) {
-  if (!isExtendable$5(obj)) {
+  if (!isExtendable$1(obj)) {
     throw new TypeError('union-value expects the first argument to be an object.');
   }
 
@@ -9752,44 +9806,6 @@ var unsetValue = function unset(obj, prop) {
   return true;
 };
 
-var setValue$1 = function(obj, prop, val) {
-  if (!isExtendable$5(obj)) {
-    return obj;
-  }
-
-  if (Array.isArray(prop)) {
-    prop = [].concat.apply([], prop).join('.');
-  }
-
-  if (typeof prop !== 'string') {
-    return obj;
-  }
-
-  var keys = splitString(prop, {sep: '.', brackets: true});
-  var len = keys.length;
-  var idx = -1;
-  var current = obj;
-
-  while (++idx < len) {
-    var key = keys[idx];
-    if (idx !== len - 1) {
-      if (!isExtendable$5(current[key])) {
-        current[key] = {};
-      }
-      current = current[key];
-      continue;
-    }
-
-    if (isPlainObject(current[key]) && isPlainObject(val)) {
-      current[key] = extendShallow$5({}, current[key], val);
-    } else {
-      current[key] = val;
-    }
-  }
-
-  return obj;
-};
-
 /**
  * Create a `Cache` constructor that when instantiated will
  * store values on the given `prop`.
@@ -9868,7 +9884,7 @@ function namespace(prop) {
     if (isobject(key) || Array.isArray(key)) {
       this.visit('set', key);
     } else {
-      setValue$1(prop ? this[prop] : this, key, val);
+      setValue(prop ? this[prop] : this, key, val);
       this.emit('set', key, val);
     }
     return this;
@@ -10041,7 +10057,7 @@ var cacheBase = namespace();
 var namespace_1 = namespace;
 cacheBase.namespace = namespace_1;
 
-var isExtendable$6 = function isExtendable(val) {
+var isExtendable$2 = function isExtendable(val) {
   return isPlainObject(val) || typeof val === 'function' || Array.isArray(val);
 };
 
@@ -10064,7 +10080,7 @@ function mixinDeep(target, objects) {
   var len = arguments.length, i = 0;
   while (++i < len) {
     var obj = arguments[i];
-    if (isObject$6(obj)) {
+    if (isObject$4(obj)) {
       forIn(obj, copy, target);
     }
   }
@@ -10080,12 +10096,12 @@ function mixinDeep(target, objects) {
  */
 
 function copy(val, key) {
-  if (key === '__proto__') {
+  if (!isValidKey$1(key)) {
     return;
   }
 
   var obj = this[key];
-  if (isObject$6(val) && isObject$6(obj)) {
+  if (isObject$4(val) && isObject$4(obj)) {
     mixinDeep(obj, val);
   } else {
     this[key] = val;
@@ -10099,10 +10115,20 @@ function copy(val, key) {
  * @return {Boolean}
  */
 
-function isObject$6(val) {
-  return isExtendable$6(val) && !Array.isArray(val);
+function isObject$4(val) {
+  return isExtendable$2(val) && !Array.isArray(val);
 }
 
+/**
+ * Returns true if `key` is a valid key to use when extending objects.
+ *
+ * @param  {String} `key`
+ * @return {Boolean}
+ */
+
+function isValidKey$1(key) {
+  return key !== '__proto__' && key !== 'constructor' && key !== 'prototype';
+}
 /**
  * Expose `mixinDeep`
  */
@@ -10201,7 +10227,7 @@ var kindOf$5 = function kindOf(val) {
   }
 
   // buffer
-  if (isBuffer$4(val)) {
+  if (isBuffer$2(val)) {
     return 'buffer';
   }
 
@@ -10273,7 +10299,7 @@ var kindOf$5 = function kindOf(val) {
  * take a look at https://github.com/feross/is-buffer
  */
 
-function isBuffer$4(val) {
+function isBuffer$2(val) {
   return val.constructor
     && typeof val.constructor.isBuffer === 'function'
     && val.constructor.isBuffer(val);
@@ -10396,14 +10422,14 @@ var kindOf$6 = function kindOf(val) {
 };
 
 // accessor descriptor properties
-var accessor$1 = {
+var accessor$3 = {
   get: 'function',
   set: 'function',
   configurable: 'boolean',
   enumerable: 'boolean'
 };
 
-function isAccessorDescriptor$1(obj, prop) {
+function isAccessorDescriptor$3(obj, prop) {
   if (typeof prop === 'string') {
     var val = Object.getOwnPropertyDescriptor(obj, prop);
     return typeof val !== 'undefined';
@@ -10413,27 +10439,27 @@ function isAccessorDescriptor$1(obj, prop) {
     return false;
   }
 
-  if (has$1(obj, 'value') || has$1(obj, 'writable')) {
+  if (has$3(obj, 'value') || has$3(obj, 'writable')) {
     return false;
   }
 
-  if (!has$1(obj, 'get') || typeof obj.get !== 'function') {
+  if (!has$3(obj, 'get') || typeof obj.get !== 'function') {
     return false;
   }
 
   // tldr: it's valid to have "set" be undefined
   // "set" might be undefined if `Object.getOwnPropertyDescriptor`
   // was used to get the value, and only `get` was defined by the user
-  if (has$1(obj, 'set') && typeof obj[key] !== 'function' && typeof obj[key] !== 'undefined') {
+  if (has$3(obj, 'set') && typeof obj[key] !== 'function' && typeof obj[key] !== 'undefined') {
     return false;
   }
 
   for (var key in obj) {
-    if (!accessor$1.hasOwnProperty(key)) {
+    if (!accessor$3.hasOwnProperty(key)) {
       continue;
     }
 
-    if (kindOf$6(obj[key]) === accessor$1[key]) {
+    if (kindOf$6(obj[key]) === accessor$3[key]) {
       continue;
     }
 
@@ -10444,7 +10470,7 @@ function isAccessorDescriptor$1(obj, prop) {
   return true;
 }
 
-function has$1(obj, key) {
+function has$3(obj, key) {
   return {}.hasOwnProperty.call(obj, key);
 }
 
@@ -10452,7 +10478,7 @@ function has$1(obj, key) {
  * Expose `isAccessorDescriptor`
  */
 
-var isAccessorDescriptor_1$1 = isAccessorDescriptor$1;
+var isAccessorDescriptor_1$3 = isAccessorDescriptor$3;
 
 var toString$9 = Object.prototype.toString;
 
@@ -10577,7 +10603,7 @@ var data = {
   writable: 'boolean'
 };
 
-function isDataDescriptor$1(obj, prop) {
+function isDataDescriptor$3(obj, prop) {
   if (kindOf$7(obj) !== 'object') {
     return false;
   }
@@ -10613,14 +10639,14 @@ function isDataDescriptor$1(obj, prop) {
  * Expose `isDataDescriptor`
  */
 
-var isDataDescriptor_1 = isDataDescriptor$1;
+var isDataDescriptor_1 = isDataDescriptor$3;
 
-var isDescriptor$1 = function isDescriptor(obj, key) {
+var isDescriptor$3 = function isDescriptor(obj, key) {
   if (kindOf$5(obj) !== 'object') {
     return false;
   }
   if ('get' in obj) {
-    return isAccessorDescriptor_1$1(obj, key);
+    return isAccessorDescriptor_1$3(obj, key);
   }
   return isDataDescriptor_1(obj, key);
 };
@@ -10634,7 +10660,7 @@ var defineProperty$3 = function defineProperty(obj, prop, val) {
     throw new TypeError('expected `prop` to be a string.');
   }
 
-  if (isDescriptor$1(val) && ('set' in val || 'get' in val)) {
+  if (isDescriptor$3(val) && ('set' in val || 'get' in val)) {
     return Object.defineProperty(obj, prop, val);
   }
 
@@ -10644,6 +10670,122 @@ var defineProperty$3 = function defineProperty(obj, prop, val) {
     writable: true,
     value: val
   });
+};
+
+var toString$a = Object.prototype.toString;
+
+/**
+ * Get the native `typeof` a value.
+ *
+ * @param  {*} `val`
+ * @return {*} Native javascript type
+ */
+
+var kindOf$8 = function kindOf(val) {
+  // primitivies
+  if (typeof val === 'undefined') {
+    return 'undefined';
+  }
+  if (val === null) {
+    return 'null';
+  }
+  if (val === true || val === false || val instanceof Boolean) {
+    return 'boolean';
+  }
+  if (typeof val === 'string' || val instanceof String) {
+    return 'string';
+  }
+  if (typeof val === 'number' || val instanceof Number) {
+    return 'number';
+  }
+
+  // functions
+  if (typeof val === 'function' || val instanceof Function) {
+    return 'function';
+  }
+
+  // array
+  if (typeof Array.isArray !== 'undefined' && Array.isArray(val)) {
+    return 'array';
+  }
+
+  // check for instances of RegExp and Date before calling `toString`
+  if (val instanceof RegExp) {
+    return 'regexp';
+  }
+  if (val instanceof Date) {
+    return 'date';
+  }
+
+  // other objects
+  var type = toString$a.call(val);
+
+  if (type === '[object RegExp]') {
+    return 'regexp';
+  }
+  if (type === '[object Date]') {
+    return 'date';
+  }
+  if (type === '[object Arguments]') {
+    return 'arguments';
+  }
+  if (type === '[object Error]') {
+    return 'error';
+  }
+
+  // buffer
+  if (isBuffer_1(val)) {
+    return 'buffer';
+  }
+
+  // es6: Map, WeakMap, Set, WeakSet
+  if (type === '[object Set]') {
+    return 'set';
+  }
+  if (type === '[object WeakSet]') {
+    return 'weakset';
+  }
+  if (type === '[object Map]') {
+    return 'map';
+  }
+  if (type === '[object WeakMap]') {
+    return 'weakmap';
+  }
+  if (type === '[object Symbol]') {
+    return 'symbol';
+  }
+
+  // typed arrays
+  if (type === '[object Int8Array]') {
+    return 'int8array';
+  }
+  if (type === '[object Uint8Array]') {
+    return 'uint8array';
+  }
+  if (type === '[object Uint8ClampedArray]') {
+    return 'uint8clampedarray';
+  }
+  if (type === '[object Int16Array]') {
+    return 'int16array';
+  }
+  if (type === '[object Uint16Array]') {
+    return 'uint16array';
+  }
+  if (type === '[object Int32Array]') {
+    return 'int32array';
+  }
+  if (type === '[object Uint32Array]') {
+    return 'uint32array';
+  }
+  if (type === '[object Float32Array]') {
+    return 'float32array';
+  }
+  if (type === '[object Float64Array]') {
+    return 'float64array';
+  }
+
+  // must be a plain object
+  return 'object';
 };
 
 /*!
@@ -10694,15 +10836,15 @@ var defineProperty$3 = function defineProperty(obj, prop, val) {
  */
 
 var copyDescriptor = function copyDescriptor(receiver, provider, from, to) {
-  if (!isObject$7(provider) && typeof provider !== 'function') {
+  if (!isObject$5(provider) && typeof provider !== 'function') {
     to = from;
     from = provider;
     provider = receiver;
   }
-  if (!isObject$7(receiver) && typeof receiver !== 'function') {
+  if (!isObject$5(receiver) && typeof receiver !== 'function') {
     throw new TypeError('expected the first argument to be an object');
   }
-  if (!isObject$7(provider) && typeof provider !== 'function') {
+  if (!isObject$5(provider) && typeof provider !== 'function') {
     throw new TypeError('expected provider to be an object');
   }
 
@@ -10721,9 +10863,30 @@ var copyDescriptor = function copyDescriptor(receiver, provider, from, to) {
   if (val) Object.defineProperty(receiver, to, val);
 };
 
-function isObject$7(val) {
+function isObject$5(val) {
   return {}.toString.call(val) === '[object Object]';
 }
+
+var defineProperty$4 = function defineProperty(obj, prop, val) {
+  if (typeof obj !== 'object' && typeof obj !== 'function') {
+    throw new TypeError('expected an object or function.');
+  }
+
+  if (typeof prop !== 'string') {
+    throw new TypeError('expected `prop` to be a string.');
+  }
+
+  if (isDescriptor$3(val) && ('set' in val || 'get' in val)) {
+    return Object.defineProperty(obj, prop, val);
+  }
+
+  return Object.defineProperty(obj, prop, {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: val
+  });
+};
 
 /**
  * Copy static properties, prototype properties, and descriptors from one object to another.
@@ -10745,10 +10908,10 @@ function isObject$7(val) {
  */
 
 function copy$1(receiver, provider, omit) {
-  if (!isObject$8(receiver)) {
+  if (!isObject$6(receiver)) {
     throw new TypeError('expected receiving object to be an object.');
   }
-  if (!isObject$8(provider)) {
+  if (!isObject$6(provider)) {
     throw new TypeError('expected providing object to be an object.');
   }
 
@@ -10760,9 +10923,9 @@ function copy$1(receiver, provider, omit) {
   while (len--) {
     var key = props[len];
 
-    if (has$2(keys, key)) {
-      defineProperty$3(receiver, key, provider[key]);
-    } else if (!(key in receiver) && !has$2(omit, key)) {
+    if (has$4(keys, key)) {
+      defineProperty$4(receiver, key, provider[key]);
+    } else if (!(key in receiver) && !has$4(omit, key)) {
       copyDescriptor(receiver, provider, key);
     }
   }
@@ -10771,8 +10934,8 @@ function copy$1(receiver, provider, omit) {
  * Return true if the given value is an object or function
  */
 
-function isObject$8(val) {
-  return kindOf$3(val) === 'object' || typeof val === 'function';
+function isObject$6(val) {
+  return kindOf$8(val) === 'object' || typeof val === 'function';
 }
 
 /**
@@ -10794,11 +10957,11 @@ function isObject$8(val) {
  * @return {Boolean}
  */
 
-function has$2(obj, val) {
+function has$4(obj, val) {
   val = arrayify$2(val);
   var len = val.length;
 
-  if (isObject$8(obj)) {
+  if (isObject$6(obj)) {
     for (var key in obj) {
       if (val.indexOf(key) > -1) {
         return true;
@@ -10806,7 +10969,7 @@ function has$2(obj, val) {
     }
 
     var keys = nativeKeys(obj);
-    return has$2(keys, val);
+    return has$4(keys, val);
   }
 
   if (Array.isArray(obj)) {
@@ -10856,7 +11019,7 @@ function arrayify$2(val) {
  */
 
 function hasConstructor(val) {
-  return isObject$8(val) && typeof val.constructor !== 'undefined';
+  return isObject$6(val) && typeof val.constructor !== 'undefined';
 }
 
 /**
@@ -10891,8 +11054,29 @@ var objectCopy = copy$1;
  * Expose `copy.has` for tests
  */
 
-var has_1 = has$2;
+var has_1 = has$4;
 objectCopy.has = has_1;
+
+var defineProperty$5 = function defineProperty(obj, prop, val) {
+  if (typeof obj !== 'object' && typeof obj !== 'function') {
+    throw new TypeError('expected an object or function.');
+  }
+
+  if (typeof prop !== 'string') {
+    throw new TypeError('expected `prop` to be a string.');
+  }
+
+  if (isDescriptor$3(val) && ('set' in val || 'get' in val)) {
+    return Object.defineProperty(obj, prop, val);
+  }
+
+  return Object.defineProperty(obj, prop, {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: val
+  });
+};
 
 /**
  * Returns a function for extending the static properties,
@@ -10950,7 +11134,7 @@ function extend$1(Parent, extendFn) {
     }
 
     // keep a reference to the parent prototype
-    defineProperty$3(Ctor.prototype, '_parent_', {
+    defineProperty$5(Ctor.prototype, '_parent_', {
       configurable: true,
       set: function() {},
       get: function() {
@@ -11769,6 +11953,27 @@ var base = namespace$1();
 var namespace_1$1 = namespace$1;
 base.namespace = namespace_1$1;
 
+var defineProperty$6 = function defineProperty(obj, prop, val) {
+  if (typeof obj !== 'object' && typeof obj !== 'function') {
+    throw new TypeError('expected an object or function.');
+  }
+
+  if (typeof prop !== 'string') {
+    throw new TypeError('expected `prop` to be a string.');
+  }
+
+  if (isDescriptor$3(val) && ('set' in val || 'get' in val)) {
+    return Object.defineProperty(obj, prop, val);
+  }
+
+  return Object.defineProperty(obj, prop, {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: val
+  });
+};
+
 /*!
  * use <https://github.com/jonschlinkert/use>
  *
@@ -11777,11 +11982,11 @@ base.namespace = namespace_1$1;
  */
 
 var use = function base(app, options) {
-  if (!isObject$9(app) && typeof app !== 'function') {
+  if (!isObject$7(app) && typeof app !== 'function') {
     throw new TypeError('expected an object or function');
   }
 
-  var opts = isObject$9(options) ? options : {};
+  var opts = isObject$7(options) ? options : {};
   var prop = typeof opts.prop === 'string' ? opts.prop : 'fns';
   if (!Array.isArray(app[prop])) {
     define$1(app, prop, []);
@@ -11834,7 +12039,7 @@ var use = function base(app, options) {
    */
 
   define$1(app, 'run', function(val) {
-    if (!isObject$9(val)) return;
+    if (!isObject$7(val)) return;
 
     if (!val.use || !val.run) {
       define$1(val, prop, val[prop] || []);
@@ -11911,7 +12116,7 @@ var use = function base(app, options) {
   return app;
 };
 
-function isObject$9(val) {
+function isObject$7(val) {
   return val && typeof val === 'object' && !Array.isArray(val);
 }
 
@@ -12755,6 +12960,36 @@ if (typeof process !== 'undefined' && process.type === 'renderer') {
 }
 });
 
+var extendShallow$4 = function extend(o/*, objects*/) {
+  if (!isExtendable$1(o)) { o = {}; }
+
+  var len = arguments.length;
+  for (var i = 1; i < len; i++) {
+    var obj = arguments[i];
+
+    if (isExtendable$1(obj)) {
+      assign$4(o, obj);
+    }
+  }
+  return o;
+};
+
+function assign$4(a, b) {
+  for (var key in b) {
+    if (hasOwn$4(b, key)) {
+      a[key] = b[key];
+    }
+  }
+}
+
+/**
+ * Returns true if the given `key` is an own property of `obj`.
+ */
+
+function hasOwn$4(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 /* -*- Mode: js; js-indent-level: 2; -*- */
 /*
  * Copyright 2011 Mozilla Foundation and contributors
@@ -13414,7 +13649,7 @@ var util_12 = util$2.compareByGeneratedPositionsInflated;
  */
 
 
-var has$3 = Object.prototype.hasOwnProperty;
+var has$5 = Object.prototype.hasOwnProperty;
 var hasNativeMap = typeof Map !== "undefined";
 
 /**
@@ -13456,7 +13691,7 @@ ArraySet.prototype.size = function ArraySet_size() {
  */
 ArraySet.prototype.add = function ArraySet_add(aStr, aAllowDuplicates) {
   var sStr = hasNativeMap ? aStr : util$2.toSetString(aStr);
-  var isDuplicate = hasNativeMap ? this.has(aStr) : has$3.call(this._set, sStr);
+  var isDuplicate = hasNativeMap ? this.has(aStr) : has$5.call(this._set, sStr);
   var idx = this._array.length;
   if (!isDuplicate || aAllowDuplicates) {
     this._array.push(aStr);
@@ -13480,7 +13715,7 @@ ArraySet.prototype.has = function ArraySet_has(aStr) {
     return this._set.has(aStr);
   } else {
     var sStr = util$2.toSetString(aStr);
-    return has$3.call(this._set, sStr);
+    return has$5.call(this._set, sStr);
   }
 };
 
@@ -13497,7 +13732,7 @@ ArraySet.prototype.indexOf = function ArraySet_indexOf(aStr) {
     }
   } else {
     var sStr = util$2.toSetString(aStr);
-    if (has$3.call(this._set, sStr)) {
+    if (has$5.call(this._set, sStr)) {
       return this._set[sStr];
     }
   }
@@ -15851,11 +16086,6 @@ void (function(root, factory) {
 }));
 });
 
-// Copyright 2014 Simon Lydell
-// X11 (“MIT”) Licensed. (See LICENSE.)
-
-
-
 function resolveUrl(/* ...urls */) {
   return Array.prototype.reduce.call(arguments, function(resolved, nextUrl) {
     return url.resolve(resolved, nextUrl)
@@ -15958,11 +16188,6 @@ var decodeUriComponent = function (encodedURI) {
 	}
 };
 
-// Copyright 2017 Simon Lydell
-// X11 (“MIT”) Licensed. (See LICENSE.)
-
-
-
 function customDecodeUriComponent(string) {
   // `decodeUriComponent` turns `+` into ` `, but that's not wanted.
   return decodeUriComponent(string.replace(/\+/g, "%2B"))
@@ -15986,17 +16211,6 @@ function atob(str) {
 }
 
 var nodeAtob = atob.atob = atob;
-
-// Copyright 2014, 2015, 2016, 2017 Simon Lydell
-// X11 (“MIT”) Licensed. (See LICENSE.)
-
-
-
-
-
-
-
-
 
 function callbackAsync(callback, error, result) {
   setImmediate(function() { callback(error, result); });
@@ -16060,7 +16274,44 @@ function resolveSourceMapSync(code, codeUrl, read) {
 }
 
 var dataUriRegex = /^data:([^,;]*)(;[^,;]*)*(?:,(.*))?$/;
+
+/**
+ * The media type for JSON text is application/json.
+ *
+ * {@link https://tools.ietf.org/html/rfc8259#section-11 | IANA Considerations }
+ *
+ * `text/json` is non-standard media type
+ */
 var jsonMimeTypeRegex = /^(?:application|text)\/json$/;
+
+/**
+ * JSON text exchanged between systems that are not part of a closed ecosystem
+ * MUST be encoded using UTF-8.
+ *
+ * {@link https://tools.ietf.org/html/rfc8259#section-8.1 | Character Encoding}
+ */
+var jsonCharacterEncoding = "utf-8";
+
+function base64ToBuf(b64) {
+  var binStr = nodeAtob(b64);
+  var len = binStr.length;
+  var arr = new Uint8Array(len);
+  for (var i = 0; i < len; i++) {
+    arr[i] = binStr.charCodeAt(i);
+  }
+  return arr
+}
+
+function decodeBase64String(b64) {
+  if (typeof TextDecoder === "undefined" || typeof Uint8Array === "undefined") {
+    return nodeAtob(b64)
+  }
+  var buf = base64ToBuf(b64);
+  // Note: `decoder.decode` method will throw a `DOMException` with the
+  // `"EncodingError"` value when an coding error is found.
+  var decoder = new TextDecoder(jsonCharacterEncoding, {fatal: true});
+  return decoder.decode(buf);
+}
 
 function resolveSourceMapHelper(code, codeUrl) {
   codeUrl = urix_1(codeUrl);
@@ -16072,7 +16323,7 @@ function resolveSourceMapHelper(code, codeUrl) {
 
   var dataUri = url$$1.match(dataUriRegex);
   if (dataUri) {
-    var mimeType = dataUri[1];
+    var mimeType = dataUri[1] || "text/plain";
     var lastParameter = dataUri[2] || "";
     var encoded = dataUri[3] || "";
     var data = {
@@ -16082,14 +16333,19 @@ function resolveSourceMapHelper(code, codeUrl) {
       map: encoded
     };
     if (!jsonMimeTypeRegex.test(mimeType)) {
-      var error = new Error("Unuseful data uri mime type: " + (mimeType || "text/plain"));
+      var error = new Error("Unuseful data uri mime type: " + mimeType);
       error.sourceMapData = data;
       throw error
     }
-    data.map = parseMapToJSON(
-      lastParameter === ";base64" ? nodeAtob(encoded) : decodeURIComponent(encoded),
-      data
-    );
+    try {
+      data.map = parseMapToJSON(
+        lastParameter === ";base64" ? decodeBase64String(encoded) : decodeURIComponent(encoded),
+        data
+      );
+    } catch (error) {
+      error.sourceMapData = data;
+      throw error
+    }
     return data
   }
 
@@ -16294,7 +16550,7 @@ var sourceMapResolveNode = {
  * Module dependencies
  */
 
-var extend$2 = extendShallow$5;
+var extend$2 = extendShallow$4;
 var SourceMap = sourceMap;
 var sourceMapResolve = sourceMapResolveNode;
 
@@ -16313,7 +16569,7 @@ var unixify = function(fp) {
  * @return {Boolean}
  */
 
-var isString$3 = function(str) {
+var isString$1 = function(str) {
   return str && typeof str === 'string';
 };
 
@@ -16342,7 +16598,7 @@ var utils = {
 	SourceMap: SourceMap,
 	sourceMapResolve: sourceMapResolve,
 	unixify: unixify,
-	isString: isString$3,
+	isString: isString$1,
 	arrayify: arrayify$3,
 	last: last
 };
@@ -16371,14 +16627,14 @@ module.exports = mixin;
  */
 
 function mixin(compiler) {
-  defineProperty$3(compiler, '_comment', compiler.comment);
+  defineProperty$6(compiler, '_comment', compiler.comment);
   compiler.map = new utils.SourceMap.SourceMapGenerator();
   compiler.position = { line: 1, column: 1 };
   compiler.content = {};
   compiler.files = {};
 
   for (var key in exports) {
-    defineProperty$3(compiler, key, exports[key]);
+    defineProperty$6(compiler, key, exports[key]);
   }
 }
 
@@ -16567,7 +16823,7 @@ Compiler.prototype = {
    */
 
   define: function(key, val) {
-    defineProperty$3(this, key, val);
+    defineProperty$6(this, key, val);
     return this;
   },
 
@@ -16681,7 +16937,7 @@ var compiler = Compiler;
  * Licensed under the MIT License.
  */
 
-var hasOwn$6 = Object.prototype.hasOwnProperty;
+var hasOwn$5 = Object.prototype.hasOwnProperty;
 
 /**
  * Expose `MapCache`
@@ -16754,7 +17010,7 @@ MapCache.prototype.get = function mapGet(key) {
  */
 
 MapCache.prototype.has = function mapHas(key) {
-  return key !== '__proto__' && hasOwn$6.call(this.__data__, key);
+  return key !== '__proto__' && hasOwn$5.call(this.__data__, key);
 };
 
 /**
@@ -16780,8 +17036,8 @@ MapCache.prototype.del = function mapDelete(key) {
 var position = function Position(start, parser) {
   this.start = start;
   this.end = { line: parser.line, column: parser.column };
-  defineProperty$3(this, 'content', parser.orig);
-  defineProperty$3(this, 'source', parser.options.source);
+  defineProperty$6(this, 'content', parser.orig);
+  defineProperty$6(this, 'source', parser.options.source);
 };
 
 var debug$2 = src('snapdragon:parser');
@@ -16834,7 +17090,7 @@ Parser.prototype = {
       nodes: [this.bos]
     };
 
-    defineProperty$3(this.bos, 'parent', this.ast);
+    defineProperty$6(this.bos, 'parent', this.ast);
     this.nodes = [this.ast];
 
     this.count = 0;
@@ -16880,7 +17136,7 @@ Parser.prototype = {
    */
 
   define: function(key, val) {
-    defineProperty$3(this, key, val);
+    defineProperty$6(this, key, val);
     return this;
   },
 
@@ -16893,7 +17149,7 @@ Parser.prototype = {
     var self = this;
 
     return function(node) {
-      defineProperty$3(node, 'position', new position(start, self));
+      defineProperty$6(node, 'position', new position(start, self));
       return node;
     };
   },
@@ -17058,8 +17314,8 @@ Parser.prototype = {
         node.inner = m[1];
       }
 
-      defineProperty$3(node, 'inside', this.stack.length > 0);
-      defineProperty$3(node, 'parent', prev);
+      defineProperty$6(node, 'inside', this.stack.length > 0);
+      defineProperty$6(node, 'parent', prev);
       prev.nodes.push(node);
     }.bind(this));
     return this;
@@ -17102,11 +17358,11 @@ Parser.prototype = {
         nodes: [open]
       });
 
-      defineProperty$3(node, 'rest', this.input);
-      defineProperty$3(node, 'parsed', parsed);
-      defineProperty$3(node, 'prefix', m[1]);
-      defineProperty$3(node, 'parent', prev);
-      defineProperty$3(open, 'parent', node);
+      defineProperty$6(node, 'rest', this.input);
+      defineProperty$6(node, 'parsed', parsed);
+      defineProperty$6(node, 'prefix', m[1]);
+      defineProperty$6(node, 'parent', prev);
+      defineProperty$6(open, 'parent', node);
 
       if (typeof fn === 'function') {
         fn.call(this, open, node);
@@ -17149,7 +17405,7 @@ Parser.prototype = {
       }
 
       parent.nodes.push(node);
-      defineProperty$3(node, 'parent', parent);
+      defineProperty$6(node, 'parent', parent);
     });
 
     return this;
@@ -17189,7 +17445,7 @@ Parser.prototype = {
       val: this.append || ''
     });
 
-    defineProperty$3(tok, 'parent', this.ast);
+    defineProperty$6(tok, 'parent', this.ast);
     return tok;
   },
 
@@ -17205,8 +17461,8 @@ Parser.prototype = {
 
     while (++idx < len) {
       if ((tok = this.parsers[this.types[idx]].call(this))) {
-        defineProperty$3(tok, 'rest', this.input);
-        defineProperty$3(tok, 'parsed', parsed);
+        defineProperty$6(tok, 'rest', this.input);
+        defineProperty$6(tok, 'parsed', parsed);
         this.last = tok;
         return tok;
       }
@@ -17237,7 +17493,7 @@ Parser.prototype = {
       if (node) {
         var prev = self.prev();
         if (prev) {
-          defineProperty$3(node, 'parent', prev);
+          defineProperty$6(node, 'parent', prev);
           if (prev.nodes) {
             prev.nodes.push(node);
           }
@@ -17276,7 +17532,7 @@ Parser.prototype = {
 
 function visit(node, fn) {
   if (!node.visited) {
-    defineProperty$3(node, 'visited', true);
+    defineProperty$6(node, 'visited', true);
     return node.nodes ? mapVisit$1(node.nodes, fn) : fn(node);
   }
   return node;
@@ -17426,7 +17682,7 @@ Snapdragon.prototype.parse = function(str, options) {
   var parsed = this.parser.parse(str, this.options);
 
   // add non-enumerable parser reference
-  defineProperty$3(parsed, 'parser', this.parser);
+  defineProperty$6(parsed, 'parser', this.parser);
   return parsed;
 };
 
@@ -17460,7 +17716,7 @@ Snapdragon.prototype.compile = function(ast, options) {
   var compiled = this.compiler.compile(ast, this.options);
 
   // add non-enumerable compiler reference
-  defineProperty$3(compiled, 'compiler', this.compiler);
+  defineProperty$6(compiled, 'compiler', this.compiler);
   return compiled;
 };
 
@@ -17484,7 +17740,7 @@ snapdragon.Parser = Parser_1;
  */
 
 function Braces(options) {
-  this.options = extendShallow$2({}, options);
+  this.options = extendShallow$1({}, options);
 }
 
 /**
@@ -17654,7 +17910,7 @@ function braces$1(pattern, options) {
  */
 
 braces$1.expand = function(pattern, options) {
-  return braces$1.create(pattern, extendShallow$2({}, options, {expand: true}));
+  return braces$1.create(pattern, extendShallow$1({}, options, {expand: true}));
 };
 
 /**
@@ -17768,7 +18024,7 @@ braces$1.makeRe = function(pattern, options) {
 
   function makeRe() {
     var arr = braces$1(pattern, options);
-    var opts = extendShallow$2({strictErrors: false}, options);
+    var opts = extendShallow$1({strictErrors: false}, options);
     return toRegex$1(arr, opts);
   }
 
@@ -17892,118 +18148,6 @@ braces$1.cache = cache$4;
  */
 
 var braces_1 = braces$1;
-
-var isExtendable$7 = function isExtendable(val) {
-  return isPlainObject(val) || typeof val === 'function' || Array.isArray(val);
-};
-
-var extendShallow$6 = Object.assign || function(obj/*, objects*/) {
-  if (obj === null || typeof obj === 'undefined') {
-    throw new TypeError('Cannot convert undefined or null to object');
-  }
-  if (!isObject$a(obj)) {
-    obj = {};
-  }
-  for (var i = 1; i < arguments.length; i++) {
-    var val = arguments[i];
-    if (isString$4(val)) {
-      val = toObject$3(val);
-    }
-    if (isObject$a(val)) {
-      assign$6(obj, val);
-      assignSymbols(obj, val);
-    }
-  }
-  return obj;
-};
-
-function assign$6(a, b) {
-  for (var key in b) {
-    if (hasOwn$7(b, key)) {
-      a[key] = b[key];
-    }
-  }
-}
-
-function isString$4(val) {
-  return (val && typeof val === 'string');
-}
-
-function toObject$3(str) {
-  var obj = {};
-  for (var i in str) {
-    obj[i] = str[i];
-  }
-  return obj;
-}
-
-function isObject$a(val) {
-  return (val && typeof val === 'object') || isExtendable$7(val);
-}
-
-/**
- * Returns true if the given `key` is an own property of `obj`.
- */
-
-function hasOwn$7(obj, key) {
-  return Object.prototype.hasOwnProperty.call(obj, key);
-}
-
-var isExtendable$8 = function isExtendable(val) {
-  return isPlainObject(val) || typeof val === 'function' || Array.isArray(val);
-};
-
-var extendShallow$7 = Object.assign || function(obj/*, objects*/) {
-  if (obj === null || typeof obj === 'undefined') {
-    throw new TypeError('Cannot convert undefined or null to object');
-  }
-  if (!isObject$b(obj)) {
-    obj = {};
-  }
-  for (var i = 1; i < arguments.length; i++) {
-    var val = arguments[i];
-    if (isString$5(val)) {
-      val = toObject$4(val);
-    }
-    if (isObject$b(val)) {
-      assign$7(obj, val);
-      assignSymbols(obj, val);
-    }
-  }
-  return obj;
-};
-
-function assign$7(a, b) {
-  for (var key in b) {
-    if (hasOwn$8(b, key)) {
-      a[key] = b[key];
-    }
-  }
-}
-
-function isString$5(val) {
-  return (val && typeof val === 'string');
-}
-
-function toObject$4(str) {
-  var obj = {};
-  for (var i in str) {
-    obj[i] = str[i];
-  }
-  return obj;
-}
-
-function isObject$b(val) {
-  return (val && typeof val === 'object') || isExtendable$8(val);
-}
-
-/**
- * Returns true if the given `key` is an own property of `obj`.
- */
-
-function hasOwn$8(obj, key) {
-  return Object.prototype.hasOwnProperty.call(obj, key);
-}
 
 /**
 * Nanomatch compilers
@@ -18877,34 +19021,6 @@ var isWindows = createCommonjsModule(function (module, exports) {
 });
 });
 
-var define$2 = (typeof Reflect !== 'undefined' && Reflect.defineProperty)
-  ? Reflect.defineProperty
-  : Object.defineProperty;
-
-var defineProperty$4 = function defineProperty(obj, key, val) {
-  if (!isobject(obj) && typeof obj !== 'function' && !Array.isArray(obj)) {
-    throw new TypeError('expected an object, function, or array');
-  }
-
-  if (typeof key !== 'string') {
-    throw new TypeError('expected "key" to be a string');
-  }
-
-  if (isDescriptor(val)) {
-    define$2(obj, key, val);
-    return obj;
-  }
-
-  define$2(obj, key, {
-    configurable: true,
-    enumerable: false,
-    writable: true,
-    value: val
-  });
-
-  return obj;
-};
-
 /*!
  * arr-diff <https://github.com/jonschlinkert/arr-diff>
  *
@@ -18976,136 +19092,6 @@ var object_pick = function pick(obj, keys) {
   return res;
 };
 
-var toString$a = Object.prototype.toString;
-
-var kindOf$8 = function kindOf(val) {
-  if (val === void 0) return 'undefined';
-  if (val === null) return 'null';
-
-  var type = typeof val;
-  if (type === 'boolean') return 'boolean';
-  if (type === 'string') return 'string';
-  if (type === 'number') return 'number';
-  if (type === 'symbol') return 'symbol';
-  if (type === 'function') {
-    return isGeneratorFn$3(val) ? 'generatorfunction' : 'function';
-  }
-
-  if (isArray$3(val)) return 'array';
-  if (isBuffer$5(val)) return 'buffer';
-  if (isArguments$3(val)) return 'arguments';
-  if (isDate$3(val)) return 'date';
-  if (isError$3(val)) return 'error';
-  if (isRegexp$3(val)) return 'regexp';
-
-  switch (ctorName$3(val)) {
-    case 'Symbol': return 'symbol';
-    case 'Promise': return 'promise';
-
-    // Set, Map, WeakSet, WeakMap
-    case 'WeakMap': return 'weakmap';
-    case 'WeakSet': return 'weakset';
-    case 'Map': return 'map';
-    case 'Set': return 'set';
-
-    // 8-bit typed arrays
-    case 'Int8Array': return 'int8array';
-    case 'Uint8Array': return 'uint8array';
-    case 'Uint8ClampedArray': return 'uint8clampedarray';
-
-    // 16-bit typed arrays
-    case 'Int16Array': return 'int16array';
-    case 'Uint16Array': return 'uint16array';
-
-    // 32-bit typed arrays
-    case 'Int32Array': return 'int32array';
-    case 'Uint32Array': return 'uint32array';
-    case 'Float32Array': return 'float32array';
-    case 'Float64Array': return 'float64array';
-  }
-
-  if (isGeneratorObj$3(val)) {
-    return 'generator';
-  }
-
-  // Non-plain objects
-  type = toString$a.call(val);
-  switch (type) {
-    case '[object Object]': return 'object';
-    // iterators
-    case '[object Map Iterator]': return 'mapiterator';
-    case '[object Set Iterator]': return 'setiterator';
-    case '[object String Iterator]': return 'stringiterator';
-    case '[object Array Iterator]': return 'arrayiterator';
-  }
-
-  // other
-  return type.slice(8, -1).toLowerCase().replace(/\s/g, '');
-};
-
-function ctorName$3(val) {
-  return val.constructor ? val.constructor.name : null;
-}
-
-function isArray$3(val) {
-  if (Array.isArray) return Array.isArray(val);
-  return val instanceof Array;
-}
-
-function isError$3(val) {
-  return val instanceof Error || (typeof val.message === 'string' && val.constructor && typeof val.constructor.stackTraceLimit === 'number');
-}
-
-function isDate$3(val) {
-  if (val instanceof Date) return true;
-  return typeof val.toDateString === 'function'
-    && typeof val.getDate === 'function'
-    && typeof val.setDate === 'function';
-}
-
-function isRegexp$3(val) {
-  if (val instanceof RegExp) return true;
-  return typeof val.flags === 'string'
-    && typeof val.ignoreCase === 'boolean'
-    && typeof val.multiline === 'boolean'
-    && typeof val.global === 'boolean';
-}
-
-function isGeneratorFn$3(name, val) {
-  return ctorName$3(name) === 'GeneratorFunction';
-}
-
-function isGeneratorObj$3(val) {
-  return typeof val.throw === 'function'
-    && typeof val.return === 'function'
-    && typeof val.next === 'function';
-}
-
-function isArguments$3(val) {
-  try {
-    if (typeof val.length === 'number' && typeof val.callee === 'function') {
-      return true;
-    }
-  } catch (err) {
-    if (err.message.indexOf('callee') !== -1) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * If you need to support Safari 5-7 (8-10 yr-old browser),
- * take a look at https://github.com/feross/is-buffer
- */
-
-function isBuffer$5(val) {
-  if (val.constructor && typeof val.constructor.isBuffer === 'function') {
-    return val.constructor.isBuffer(val);
-  }
-  return false;
-}
-
 var utils_1$1 = createCommonjsModule(function (module) {
 
 var utils = module.exports;
@@ -19117,11 +19103,11 @@ var utils = module.exports;
 
 var isWindows$$1 = isWindows();
 
-utils.define = defineProperty$4;
+utils.define = defineProperty;
 utils.diff = arrDiff;
-utils.extend = extendShallow$7;
+utils.extend = extendShallow;
 utils.pick = object_pick;
-utils.typeOf = kindOf$8;
+utils.typeOf = kindOf;
 utils.unique = arrayUnique;
 
 /**
@@ -19844,7 +19830,7 @@ nanomatch.all = function(str, patterns, options) {
  */
 
 nanomatch.not = function(list, patterns, options) {
-  var opts = extendShallow$7({}, options);
+  var opts = extendShallow({}, options);
   var ignore = opts.ignore;
   delete opts.ignore;
 
@@ -19898,7 +19884,7 @@ nanomatch.contains = function(str, patterns, options) {
     }
   }
 
-  var opts = extendShallow$7({}, options, {contains: true});
+  var opts = extendShallow({}, options, {contains: true});
   return nanomatch.any(str, patterns, opts);
 };
 
@@ -20045,7 +20031,7 @@ nanomatch.matcher = function matcher(pattern, options) {
  */
 
 nanomatch.capture = function(pattern, str, options) {
-  var re = nanomatch.makeRe(pattern, extendShallow$7({capture: true}, options));
+  var re = nanomatch.makeRe(pattern, extendShallow({capture: true}, options));
   var unixify = utils_1$1.unixify(options);
 
   function match() {
@@ -20324,35 +20310,23 @@ nanomatch.cache = cache$5;
 
 var nanomatch_1 = nanomatch;
 
-/*!
- * is-extendable <https://github.com/jonschlinkert/is-extendable>
- *
- * Copyright (c) 2015, Jon Schlinkert.
- * Licensed under the MIT License.
- */
-
-var isExtendable$9 = function isExtendable(val) {
-  return typeof val !== 'undefined' && val !== null
-    && (typeof val === 'object' || typeof val === 'function');
-};
-
-var extendShallow$8 = function extend(o/*, objects*/) {
-  if (!isExtendable$9(o)) { o = {}; }
+var extendShallow$5 = function extend(o/*, objects*/) {
+  if (!isExtendable$1(o)) { o = {}; }
 
   var len = arguments.length;
   for (var i = 1; i < len; i++) {
     var obj = arguments[i];
 
-    if (isExtendable$9(obj)) {
-      assign$8(o, obj);
+    if (isExtendable$1(obj)) {
+      assign$5(o, obj);
     }
   }
   return o;
 };
 
-function assign$8(a, b) {
+function assign$5(a, b) {
   for (var key in b) {
-    if (hasOwn$9(b, key)) {
+    if (hasOwn$6(b, key)) {
       a[key] = b[key];
     }
   }
@@ -20362,7 +20336,7 @@ function assign$8(a, b) {
  * Returns true if the given `key` is an own property of `obj`.
  */
 
-function hasOwn$9(obj, key) {
+function hasOwn$6(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
@@ -20507,501 +20481,7 @@ var utils$1 = {
 	createRegex: createRegex
 };
 
-var toString$b = Object.prototype.toString;
-
-/**
- * Get the native `typeof` a value.
- *
- * @param  {*} `val`
- * @return {*} Native javascript type
- */
-
-var kindOf$9 = function kindOf(val) {
-  var type = typeof val;
-
-  // primitivies
-  if (type === 'undefined') {
-    return 'undefined';
-  }
-  if (val === null) {
-    return 'null';
-  }
-  if (val === true || val === false || val instanceof Boolean) {
-    return 'boolean';
-  }
-  if (type === 'string' || val instanceof String) {
-    return 'string';
-  }
-  if (type === 'number' || val instanceof Number) {
-    return 'number';
-  }
-
-  // functions
-  if (type === 'function' || val instanceof Function) {
-    if (typeof val.constructor.name !== 'undefined' && val.constructor.name.slice(0, 9) === 'Generator') {
-      return 'generatorfunction';
-    }
-    return 'function';
-  }
-
-  // array
-  if (typeof Array.isArray !== 'undefined' && Array.isArray(val)) {
-    return 'array';
-  }
-
-  // check for instances of RegExp and Date before calling `toString`
-  if (val instanceof RegExp) {
-    return 'regexp';
-  }
-  if (val instanceof Date) {
-    return 'date';
-  }
-
-  // other objects
-  type = toString$b.call(val);
-
-  if (type === '[object RegExp]') {
-    return 'regexp';
-  }
-  if (type === '[object Date]') {
-    return 'date';
-  }
-  if (type === '[object Arguments]') {
-    return 'arguments';
-  }
-  if (type === '[object Error]') {
-    return 'error';
-  }
-  if (type === '[object Promise]') {
-    return 'promise';
-  }
-
-  // buffer
-  if (isBuffer$6(val)) {
-    return 'buffer';
-  }
-
-  // es6: Map, WeakMap, Set, WeakSet
-  if (type === '[object Set]') {
-    return 'set';
-  }
-  if (type === '[object WeakSet]') {
-    return 'weakset';
-  }
-  if (type === '[object Map]') {
-    return 'map';
-  }
-  if (type === '[object WeakMap]') {
-    return 'weakmap';
-  }
-  if (type === '[object Symbol]') {
-    return 'symbol';
-  }
-  
-  if (type === '[object Map Iterator]') {
-    return 'mapiterator';
-  }
-  if (type === '[object Set Iterator]') {
-    return 'setiterator';
-  }
-  if (type === '[object String Iterator]') {
-    return 'stringiterator';
-  }
-  if (type === '[object Array Iterator]') {
-    return 'arrayiterator';
-  }
-  
-  // typed arrays
-  if (type === '[object Int8Array]') {
-    return 'int8array';
-  }
-  if (type === '[object Uint8Array]') {
-    return 'uint8array';
-  }
-  if (type === '[object Uint8ClampedArray]') {
-    return 'uint8clampedarray';
-  }
-  if (type === '[object Int16Array]') {
-    return 'int16array';
-  }
-  if (type === '[object Uint16Array]') {
-    return 'uint16array';
-  }
-  if (type === '[object Int32Array]') {
-    return 'int32array';
-  }
-  if (type === '[object Uint32Array]') {
-    return 'uint32array';
-  }
-  if (type === '[object Float32Array]') {
-    return 'float32array';
-  }
-  if (type === '[object Float64Array]') {
-    return 'float64array';
-  }
-
-  // must be a plain object
-  return 'object';
-};
-
-/**
- * If you need to support Safari 5-7 (8-10 yr-old browser),
- * take a look at https://github.com/feross/is-buffer
- */
-
-function isBuffer$6(val) {
-  return val.constructor
-    && typeof val.constructor.isBuffer === 'function'
-    && val.constructor.isBuffer(val);
-}
-
-var toString$c = Object.prototype.toString;
-
-/**
- * Get the native `typeof` a value.
- *
- * @param  {*} `val`
- * @return {*} Native javascript type
- */
-
-var kindOf$a = function kindOf(val) {
-  // primitivies
-  if (typeof val === 'undefined') {
-    return 'undefined';
-  }
-  if (val === null) {
-    return 'null';
-  }
-  if (val === true || val === false || val instanceof Boolean) {
-    return 'boolean';
-  }
-  if (typeof val === 'string' || val instanceof String) {
-    return 'string';
-  }
-  if (typeof val === 'number' || val instanceof Number) {
-    return 'number';
-  }
-
-  // functions
-  if (typeof val === 'function' || val instanceof Function) {
-    return 'function';
-  }
-
-  // array
-  if (typeof Array.isArray !== 'undefined' && Array.isArray(val)) {
-    return 'array';
-  }
-
-  // check for instances of RegExp and Date before calling `toString`
-  if (val instanceof RegExp) {
-    return 'regexp';
-  }
-  if (val instanceof Date) {
-    return 'date';
-  }
-
-  // other objects
-  var type = toString$c.call(val);
-
-  if (type === '[object RegExp]') {
-    return 'regexp';
-  }
-  if (type === '[object Date]') {
-    return 'date';
-  }
-  if (type === '[object Arguments]') {
-    return 'arguments';
-  }
-  if (type === '[object Error]') {
-    return 'error';
-  }
-
-  // buffer
-  if (isBuffer_1(val)) {
-    return 'buffer';
-  }
-
-  // es6: Map, WeakMap, Set, WeakSet
-  if (type === '[object Set]') {
-    return 'set';
-  }
-  if (type === '[object WeakSet]') {
-    return 'weakset';
-  }
-  if (type === '[object Map]') {
-    return 'map';
-  }
-  if (type === '[object WeakMap]') {
-    return 'weakmap';
-  }
-  if (type === '[object Symbol]') {
-    return 'symbol';
-  }
-
-  // typed arrays
-  if (type === '[object Int8Array]') {
-    return 'int8array';
-  }
-  if (type === '[object Uint8Array]') {
-    return 'uint8array';
-  }
-  if (type === '[object Uint8ClampedArray]') {
-    return 'uint8clampedarray';
-  }
-  if (type === '[object Int16Array]') {
-    return 'int16array';
-  }
-  if (type === '[object Uint16Array]') {
-    return 'uint16array';
-  }
-  if (type === '[object Int32Array]') {
-    return 'int32array';
-  }
-  if (type === '[object Uint32Array]') {
-    return 'uint32array';
-  }
-  if (type === '[object Float32Array]') {
-    return 'float32array';
-  }
-  if (type === '[object Float64Array]') {
-    return 'float64array';
-  }
-
-  // must be a plain object
-  return 'object';
-};
-
-// accessor descriptor properties
-var accessor$2 = {
-  get: 'function',
-  set: 'function',
-  configurable: 'boolean',
-  enumerable: 'boolean'
-};
-
-function isAccessorDescriptor$2(obj, prop) {
-  if (typeof prop === 'string') {
-    var val = Object.getOwnPropertyDescriptor(obj, prop);
-    return typeof val !== 'undefined';
-  }
-
-  if (kindOf$a(obj) !== 'object') {
-    return false;
-  }
-
-  if (has$4(obj, 'value') || has$4(obj, 'writable')) {
-    return false;
-  }
-
-  if (!has$4(obj, 'get') || typeof obj.get !== 'function') {
-    return false;
-  }
-
-  // tldr: it's valid to have "set" be undefined
-  // "set" might be undefined if `Object.getOwnPropertyDescriptor`
-  // was used to get the value, and only `get` was defined by the user
-  if (has$4(obj, 'set') && typeof obj[key] !== 'function' && typeof obj[key] !== 'undefined') {
-    return false;
-  }
-
-  for (var key in obj) {
-    if (!accessor$2.hasOwnProperty(key)) {
-      continue;
-    }
-
-    if (kindOf$a(obj[key]) === accessor$2[key]) {
-      continue;
-    }
-
-    if (typeof obj[key] !== 'undefined') {
-      return false;
-    }
-  }
-  return true;
-}
-
-function has$4(obj, key) {
-  return {}.hasOwnProperty.call(obj, key);
-}
-
-/**
- * Expose `isAccessorDescriptor`
- */
-
-var isAccessorDescriptor_1$2 = isAccessorDescriptor$2;
-
-var toString$d = Object.prototype.toString;
-
-/**
- * Get the native `typeof` a value.
- *
- * @param  {*} `val`
- * @return {*} Native javascript type
- */
-
-var kindOf$b = function kindOf(val) {
-  // primitivies
-  if (typeof val === 'undefined') {
-    return 'undefined';
-  }
-  if (val === null) {
-    return 'null';
-  }
-  if (val === true || val === false || val instanceof Boolean) {
-    return 'boolean';
-  }
-  if (typeof val === 'string' || val instanceof String) {
-    return 'string';
-  }
-  if (typeof val === 'number' || val instanceof Number) {
-    return 'number';
-  }
-
-  // functions
-  if (typeof val === 'function' || val instanceof Function) {
-    return 'function';
-  }
-
-  // array
-  if (typeof Array.isArray !== 'undefined' && Array.isArray(val)) {
-    return 'array';
-  }
-
-  // check for instances of RegExp and Date before calling `toString`
-  if (val instanceof RegExp) {
-    return 'regexp';
-  }
-  if (val instanceof Date) {
-    return 'date';
-  }
-
-  // other objects
-  var type = toString$d.call(val);
-
-  if (type === '[object RegExp]') {
-    return 'regexp';
-  }
-  if (type === '[object Date]') {
-    return 'date';
-  }
-  if (type === '[object Arguments]') {
-    return 'arguments';
-  }
-  if (type === '[object Error]') {
-    return 'error';
-  }
-
-  // buffer
-  if (isBuffer_1(val)) {
-    return 'buffer';
-  }
-
-  // es6: Map, WeakMap, Set, WeakSet
-  if (type === '[object Set]') {
-    return 'set';
-  }
-  if (type === '[object WeakSet]') {
-    return 'weakset';
-  }
-  if (type === '[object Map]') {
-    return 'map';
-  }
-  if (type === '[object WeakMap]') {
-    return 'weakmap';
-  }
-  if (type === '[object Symbol]') {
-    return 'symbol';
-  }
-
-  // typed arrays
-  if (type === '[object Int8Array]') {
-    return 'int8array';
-  }
-  if (type === '[object Uint8Array]') {
-    return 'uint8array';
-  }
-  if (type === '[object Uint8ClampedArray]') {
-    return 'uint8clampedarray';
-  }
-  if (type === '[object Int16Array]') {
-    return 'int16array';
-  }
-  if (type === '[object Uint16Array]') {
-    return 'uint16array';
-  }
-  if (type === '[object Int32Array]') {
-    return 'int32array';
-  }
-  if (type === '[object Uint32Array]') {
-    return 'uint32array';
-  }
-  if (type === '[object Float32Array]') {
-    return 'float32array';
-  }
-  if (type === '[object Float64Array]') {
-    return 'float64array';
-  }
-
-  // must be a plain object
-  return 'object';
-};
-
-// data descriptor properties
-var data$1 = {
-  configurable: 'boolean',
-  enumerable: 'boolean',
-  writable: 'boolean'
-};
-
-function isDataDescriptor$2(obj, prop) {
-  if (kindOf$b(obj) !== 'object') {
-    return false;
-  }
-
-  if (typeof prop === 'string') {
-    var val = Object.getOwnPropertyDescriptor(obj, prop);
-    return typeof val !== 'undefined';
-  }
-
-  if (!('value' in obj) && !('writable' in obj)) {
-    return false;
-  }
-
-  for (var key in obj) {
-    if (key === 'value') continue;
-
-    if (!data$1.hasOwnProperty(key)) {
-      continue;
-    }
-
-    if (kindOf$b(obj[key]) === data$1[key]) {
-      continue;
-    }
-
-    if (typeof obj[key] !== 'undefined') {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Expose `isDataDescriptor`
- */
-
-var isDataDescriptor_1$1 = isDataDescriptor$2;
-
-var isDescriptor$2 = function isDescriptor(obj, key) {
-  if (kindOf$9(obj) !== 'object') {
-    return false;
-  }
-  if ('get' in obj) {
-    return isAccessorDescriptor_1$2(obj, key);
-  }
-  return isDataDescriptor_1$1(obj, key);
-};
-
-var defineProperty$5 = function defineProperty(obj, prop, val) {
+var defineProperty$7 = function defineProperty(obj, prop, val) {
   if (typeof obj !== 'object' && typeof obj !== 'function') {
     throw new TypeError('expected an object or function.');
   }
@@ -21010,7 +20490,7 @@ var defineProperty$5 = function defineProperty(obj, prop, val) {
     throw new TypeError('expected `prop` to be a string.');
   }
 
-  if (isDescriptor$2(val) && ('set' in val || 'get' in val)) {
+  if (isDescriptor$3(val) && ('set' in val || 'get' in val)) {
     return Object.defineProperty(obj, prop, val);
   }
 
@@ -21132,8 +20612,8 @@ function parsers$2(brackets) {
         nodes: [open]
       });
 
-      defineProperty$5(node, 'parent', prev);
-      defineProperty$5(open, 'parent', node);
+      defineProperty$7(node, 'parent', prev);
+      defineProperty$7(open, 'parent', node);
       this.push('bracket', node);
       prev.nodes.push(node);
     })
@@ -21221,7 +20701,7 @@ function parsers$2(brackets) {
       }
 
       bracket.nodes.push(node);
-      defineProperty$5(node, 'parent', bracket);
+      defineProperty$7(node, 'parent', bracket);
     });
 }
 
@@ -21238,35 +20718,23 @@ var parsers_1 = parsers$2;
 var TEXT_REGEX_1 = TEXT_REGEX;
 parsers_1.TEXT_REGEX = TEXT_REGEX_1;
 
-/*!
- * is-extendable <https://github.com/jonschlinkert/is-extendable>
- *
- * Copyright (c) 2015, Jon Schlinkert.
- * Licensed under the MIT License.
- */
-
-var isExtendable$a = function isExtendable(val) {
-  return typeof val !== 'undefined' && val !== null
-    && (typeof val === 'object' || typeof val === 'function');
-};
-
-var extendShallow$9 = function extend(o/*, objects*/) {
-  if (!isExtendable$a(o)) { o = {}; }
+var extendShallow$6 = function extend(o/*, objects*/) {
+  if (!isExtendable$1(o)) { o = {}; }
 
   var len = arguments.length;
   for (var i = 1; i < len; i++) {
     var obj = arguments[i];
 
-    if (isExtendable$a(obj)) {
-      assign$9(o, obj);
+    if (isExtendable$1(obj)) {
+      assign$6(o, obj);
     }
   }
   return o;
 };
 
-function assign$9(a, b) {
+function assign$6(a, b) {
   for (var key in b) {
-    if (hasOwn$a(b, key)) {
+    if (hasOwn$7(b, key)) {
       a[key] = b[key];
     }
   }
@@ -21276,7 +20744,7 @@ function assign$9(a, b) {
  * Returns true if the given `key` is an own property of `obj`.
  */
 
-function hasOwn$a(obj, key) {
+function hasOwn$7(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
@@ -21333,7 +20801,7 @@ function brackets(pattern, options) {
 
 brackets.match = function(arr, pattern, options) {
   arr = [].concat(arr);
-  var opts = extendShallow$9({}, options);
+  var opts = extendShallow$6({}, options);
   var isMatch = brackets.matcher(pattern, opts);
   var len = arr.length;
   var idx = -1;
@@ -21424,7 +20892,7 @@ brackets.matcher = function(pattern, options) {
 
 brackets.makeRe = function(pattern, options) {
   var res = brackets.create(pattern, options);
-  var opts = extendShallow$9({strictErrors: false}, options);
+  var opts = extendShallow$6({strictErrors: false}, options);
   return toRegex$1(res.output, opts);
 };
 
@@ -21656,7 +21124,115 @@ var compilers$3 = function(extglob) {
     });
 };
 
-var defineProperty$6 = function defineProperty(obj, prop, val) {
+// accessor descriptor properties
+var accessor$4 = {
+  get: 'function',
+  set: 'function',
+  configurable: 'boolean',
+  enumerable: 'boolean'
+};
+
+function isAccessorDescriptor$4(obj, prop) {
+  if (typeof prop === 'string') {
+    var val = Object.getOwnPropertyDescriptor(obj, prop);
+    return typeof val !== 'undefined';
+  }
+
+  if (kindOf(obj) !== 'object') {
+    return false;
+  }
+
+  if (has$6(obj, 'value') || has$6(obj, 'writable')) {
+    return false;
+  }
+
+  if (!has$6(obj, 'get') || typeof obj.get !== 'function') {
+    return false;
+  }
+
+  // tldr: it's valid to have "set" be undefined
+  // "set" might be undefined if `Object.getOwnPropertyDescriptor`
+  // was used to get the value, and only `get` was defined by the user
+  if (has$6(obj, 'set') && typeof obj[key] !== 'function' && typeof obj[key] !== 'undefined') {
+    return false;
+  }
+
+  for (var key in obj) {
+    if (!accessor$4.hasOwnProperty(key)) {
+      continue;
+    }
+
+    if (kindOf(obj[key]) === accessor$4[key]) {
+      continue;
+    }
+
+    if (typeof obj[key] !== 'undefined') {
+      return false;
+    }
+  }
+  return true;
+}
+
+function has$6(obj, key) {
+  return {}.hasOwnProperty.call(obj, key);
+}
+
+/**
+ * Expose `isAccessorDescriptor`
+ */
+
+var isAccessorDescriptor_1$4 = isAccessorDescriptor$4;
+
+var isDataDescriptor$4 = function isDataDescriptor(obj, prop) {
+  // data descriptor properties
+  var data = {
+    configurable: 'boolean',
+    enumerable: 'boolean',
+    writable: 'boolean'
+  };
+
+  if (kindOf(obj) !== 'object') {
+    return false;
+  }
+
+  if (typeof prop === 'string') {
+    var val = Object.getOwnPropertyDescriptor(obj, prop);
+    return typeof val !== 'undefined';
+  }
+
+  if (!('value' in obj) && !('writable' in obj)) {
+    return false;
+  }
+
+  for (var key in obj) {
+    if (key === 'value') continue;
+
+    if (!data.hasOwnProperty(key)) {
+      continue;
+    }
+
+    if (kindOf(obj[key]) === data[key]) {
+      continue;
+    }
+
+    if (typeof obj[key] !== 'undefined') {
+      return false;
+    }
+  }
+  return true;
+};
+
+var isDescriptor$4 = function isDescriptor(obj, key) {
+  if (kindOf(obj) !== 'object') {
+    return false;
+  }
+  if ('get' in obj) {
+    return isAccessorDescriptor_1$4(obj, key);
+  }
+  return isDataDescriptor$4(obj, key);
+};
+
+var defineProperty$8 = function defineProperty(obj, prop, val) {
   if (typeof obj !== 'object' && typeof obj !== 'function') {
     throw new TypeError('expected an object or function.');
   }
@@ -21665,7 +21241,7 @@ var defineProperty$6 = function defineProperty(obj, prop, val) {
     throw new TypeError('expected `prop` to be a string.');
   }
 
-  if (isDescriptor(val) && ('set' in val || 'get' in val)) {
+  if (isDescriptor$4(val) && ('set' in val || 'get' in val)) {
     return Object.defineProperty(obj, prop, val);
   }
 
@@ -21803,10 +21379,10 @@ function parsers$3(extglob) {
         node.prefix = '@';
       }
 
-      defineProperty$6(node, 'rest', this.input);
-      defineProperty$6(node, 'parsed', parsed);
-      defineProperty$6(node, 'parent', prev);
-      defineProperty$6(open, 'parent', node);
+      defineProperty$8(node, 'rest', this.input);
+      defineProperty$8(node, 'parsed', parsed);
+      defineProperty$8(node, 'parent', prev);
+      defineProperty$8(open, 'parent', node);
 
       this.push('paren', node);
       prev.nodes.push(node);
@@ -21840,7 +21416,7 @@ function parsers$3(extglob) {
 
       node.prefix = parent.prefix;
       parent.nodes.push(node);
-      defineProperty$6(node, 'parent', parent);
+      defineProperty$8(node, 'parent', parent);
     })
 
     /**
@@ -21919,7 +21495,7 @@ parsers_1$1.TEXT_REGEX = TEXT_REGEX_1$1;
  */
 
 function Extglob(options) {
-  this.options = extendShallow$8({source: 'extglob'}, options);
+  this.options = extendShallow$5({source: 'extglob'}, options);
   this.snapdragon = this.options.snapdragon || new snapdragon(this.options);
   this.snapdragon.patterns = this.snapdragon.patterns || {};
   this.compiler = this.snapdragon.compiler;
@@ -21932,7 +21508,7 @@ function Extglob(options) {
    * Override Snapdragon `.parse` method
    */
 
-  defineProperty$6(this.snapdragon, 'parse', function(str, options) {
+  defineProperty$8(this.snapdragon, 'parse', function(str, options) {
     var parsed = snapdragon.prototype.parse.apply(this, arguments);
     parsed.input = str;
 
@@ -21948,7 +21524,7 @@ function Extglob(options) {
     }
 
     // add non-enumerable parser reference
-    defineProperty$6(parsed, 'parser', this.parser);
+    defineProperty$8(parsed, 'parser', this.parser);
     return parsed;
   });
 
@@ -21956,7 +21532,7 @@ function Extglob(options) {
    * Decorate `.parse` method
    */
 
-  defineProperty$6(this, 'parse', function(ast, options) {
+  defineProperty$8(this, 'parse', function(ast, options) {
     return this.snapdragon.parse.apply(this.snapdragon, arguments);
   });
 
@@ -21964,7 +21540,7 @@ function Extglob(options) {
    * Decorate `.compile` method
    */
 
-  defineProperty$6(this, 'compile', function(ast, options) {
+  defineProperty$8(this, 'compile', function(ast, options) {
     return this.snapdragon.compile.apply(this.snapdragon, arguments);
   });
 
@@ -22132,7 +21708,7 @@ extglob$1.contains = function(str, pattern, options) {
     return pattern === str;
   }
 
-  var opts = extendShallow$8({}, options, {contains: true});
+  var opts = extendShallow$5({}, options, {contains: true});
   opts.strictClose = false;
   opts.strictOpen = false;
   return extglob$1.isMatch(str, pattern, opts);
@@ -22222,7 +21798,7 @@ extglob$1.create = function(pattern, options) {
  */
 
 extglob$1.capture = function(pattern, str, options) {
-  var re = extglob$1.makeRe(pattern, extendShallow$8({capture: true}, options));
+  var re = extglob$1.makeRe(pattern, extendShallow$5({capture: true}, options));
 
   function match() {
     return function(string) {
@@ -22268,7 +21844,7 @@ extglob$1.makeRe = function(pattern, options) {
   }
 
   function makeRe() {
-    var opts = extendShallow$8({strictErrors: false}, options);
+    var opts = extendShallow$5({strictErrors: false}, options);
     if (opts.strictErrors === true) opts.strict = true;
     var res = extglob$1.create(pattern, opts);
     return toRegex$1(res.output, opts);
@@ -22459,164 +22035,6 @@ function textRegex(pattern) {
 
 var cache$6 = new (fragmentCache)();
 
-var define$3 = (typeof Reflect !== 'undefined' && Reflect.defineProperty)
-  ? Reflect.defineProperty
-  : Object.defineProperty;
-
-var defineProperty$7 = function defineProperty(obj, key, val) {
-  if (!isobject(obj) && typeof obj !== 'function' && !Array.isArray(obj)) {
-    throw new TypeError('expected an object, function, or array');
-  }
-
-  if (typeof key !== 'string') {
-    throw new TypeError('expected "key" to be a string');
-  }
-
-  if (isDescriptor(val)) {
-    define$3(obj, key, val);
-    return obj;
-  }
-
-  define$3(obj, key, {
-    configurable: true,
-    enumerable: false,
-    writable: true,
-    value: val
-  });
-
-  return obj;
-};
-
-var toString$e = Object.prototype.toString;
-
-var kindOf$c = function kindOf(val) {
-  if (val === void 0) return 'undefined';
-  if (val === null) return 'null';
-
-  var type = typeof val;
-  if (type === 'boolean') return 'boolean';
-  if (type === 'string') return 'string';
-  if (type === 'number') return 'number';
-  if (type === 'symbol') return 'symbol';
-  if (type === 'function') {
-    return isGeneratorFn$4(val) ? 'generatorfunction' : 'function';
-  }
-
-  if (isArray$4(val)) return 'array';
-  if (isBuffer$7(val)) return 'buffer';
-  if (isArguments$4(val)) return 'arguments';
-  if (isDate$4(val)) return 'date';
-  if (isError$4(val)) return 'error';
-  if (isRegexp$4(val)) return 'regexp';
-
-  switch (ctorName$4(val)) {
-    case 'Symbol': return 'symbol';
-    case 'Promise': return 'promise';
-
-    // Set, Map, WeakSet, WeakMap
-    case 'WeakMap': return 'weakmap';
-    case 'WeakSet': return 'weakset';
-    case 'Map': return 'map';
-    case 'Set': return 'set';
-
-    // 8-bit typed arrays
-    case 'Int8Array': return 'int8array';
-    case 'Uint8Array': return 'uint8array';
-    case 'Uint8ClampedArray': return 'uint8clampedarray';
-
-    // 16-bit typed arrays
-    case 'Int16Array': return 'int16array';
-    case 'Uint16Array': return 'uint16array';
-
-    // 32-bit typed arrays
-    case 'Int32Array': return 'int32array';
-    case 'Uint32Array': return 'uint32array';
-    case 'Float32Array': return 'float32array';
-    case 'Float64Array': return 'float64array';
-  }
-
-  if (isGeneratorObj$4(val)) {
-    return 'generator';
-  }
-
-  // Non-plain objects
-  type = toString$e.call(val);
-  switch (type) {
-    case '[object Object]': return 'object';
-    // iterators
-    case '[object Map Iterator]': return 'mapiterator';
-    case '[object Set Iterator]': return 'setiterator';
-    case '[object String Iterator]': return 'stringiterator';
-    case '[object Array Iterator]': return 'arrayiterator';
-  }
-
-  // other
-  return type.slice(8, -1).toLowerCase().replace(/\s/g, '');
-};
-
-function ctorName$4(val) {
-  return val.constructor ? val.constructor.name : null;
-}
-
-function isArray$4(val) {
-  if (Array.isArray) return Array.isArray(val);
-  return val instanceof Array;
-}
-
-function isError$4(val) {
-  return val instanceof Error || (typeof val.message === 'string' && val.constructor && typeof val.constructor.stackTraceLimit === 'number');
-}
-
-function isDate$4(val) {
-  if (val instanceof Date) return true;
-  return typeof val.toDateString === 'function'
-    && typeof val.getDate === 'function'
-    && typeof val.setDate === 'function';
-}
-
-function isRegexp$4(val) {
-  if (val instanceof RegExp) return true;
-  return typeof val.flags === 'string'
-    && typeof val.ignoreCase === 'boolean'
-    && typeof val.multiline === 'boolean'
-    && typeof val.global === 'boolean';
-}
-
-function isGeneratorFn$4(name, val) {
-  return ctorName$4(name) === 'GeneratorFunction';
-}
-
-function isGeneratorObj$4(val) {
-  return typeof val.throw === 'function'
-    && typeof val.return === 'function'
-    && typeof val.next === 'function';
-}
-
-function isArguments$4(val) {
-  try {
-    if (typeof val.length === 'number' && typeof val.callee === 'function') {
-      return true;
-    }
-  } catch (err) {
-    if (err.message.indexOf('callee') !== -1) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * If you need to support Safari 5-7 (8-10 yr-old browser),
- * take a look at https://github.com/feross/is-buffer
- */
-
-function isBuffer$7(val) {
-  if (val.constructor && typeof val.constructor.isBuffer === 'function') {
-    return val.constructor.isBuffer(val);
-  }
-  return false;
-}
-
 var utils_1$3 = createCommonjsModule(function (module) {
 
 var utils = module.exports;
@@ -22627,11 +22045,11 @@ var utils = module.exports;
  */
 
 
-utils.define = defineProperty$7;
+utils.define = defineProperty;
 utils.diff = arrDiff;
-utils.extend = extendShallow$6;
+utils.extend = extendShallow;
 utils.pick = object_pick;
-utils.typeOf = kindOf$c;
+utils.typeOf = kindOf;
 utils.unique = arrayUnique;
 
 /**
@@ -23266,7 +22684,7 @@ micromatch.all = function(str, patterns, options) {
  */
 
 micromatch.not = function(list, patterns, options) {
-  var opts = extendShallow$6({}, options);
+  var opts = extendShallow({}, options);
   var ignore = opts.ignore;
   delete opts.ignore;
 
@@ -23321,7 +22739,7 @@ micromatch.contains = function(str, patterns, options) {
     }
   }
 
-  var opts = extendShallow$6({}, options, {contains: true});
+  var opts = extendShallow({}, options, {contains: true});
   return micromatch.any(str, patterns, opts);
 };
 
@@ -23462,7 +22880,7 @@ micromatch.matcher = function matcher(pattern, options) {
  */
 
 micromatch.capture = function(pattern, str, options) {
-  var re = micromatch.makeRe(pattern, extendShallow$6({capture: true}, options));
+  var re = micromatch.makeRe(pattern, extendShallow({capture: true}, options));
   var unixify = utils_1$3.unixify(options);
 
   function match() {
@@ -23564,7 +22982,7 @@ micromatch.braces = function(pattern, options) {
  */
 
 micromatch.braceExpand = function(pattern, options) {
-  var opts = extendShallow$6({}, options, {expand: true});
+  var opts = extendShallow({}, options, {expand: true});
   return micromatch.braces(pattern, opts);
 };
 
@@ -23822,7 +23240,7 @@ exports.isStaticPattern = isStaticPattern;
  * Return true for pattern that looks like glob.
  */
 function isDynamicPattern(pattern) {
-    return isGlob$1(pattern);
+    return isGlob$1(pattern, { strict: false });
 }
 exports.isDynamicPattern = isDynamicPattern;
 /**
@@ -23985,8 +23403,12 @@ function generate(patterns, options) {
     var unixIgnore = options.ignore.map(pattern.unixifyPattern);
     var positivePatterns = getPositivePatterns(unixPatterns);
     var negativePatterns = getNegativePatternsAsPositive(unixPatterns, unixIgnore);
-    var staticPatterns = positivePatterns.filter(pattern.isStaticPattern);
-    var dynamicPatterns = positivePatterns.filter(pattern.isDynamicPattern);
+    /**
+     * When the `case` option is disabled, all patterns must be marked as dynamic, because we cannot check filepath
+     * directly (without read directory).
+     */
+    var staticPatterns = !options.case ? [] : positivePatterns.filter(pattern.isStaticPattern);
+    var dynamicPatterns = !options.case ? positivePatterns : positivePatterns.filter(pattern.isDynamicPattern);
     var staticTasks = convertPatternsToTasks(staticPatterns, negativePatterns, /* dynamic */ false);
     var dynamicTasks = convertPatternsToTasks(dynamicPatterns, negativePatterns, /* dynamic */ true);
     return staticTasks.concat(dynamicTasks);
@@ -24054,9 +23476,9 @@ function convertPatternGroupToTask(base, positive, negative, dynamic) {
     return {
         base: base,
         dynamic: dynamic,
-        patterns: [].concat(positive, negative.map(pattern.convertToNegativePattern)),
         positive: positive,
-        negative: negative
+        negative: negative,
+        patterns: [].concat(positive, negative.map(pattern.convertToNegativePattern))
     };
 }
 exports.convertPatternGroupToTask = convertPatternGroupToTask;
@@ -25240,11 +24662,7 @@ exports.normalize = normalize;
  * Returns normalized absolute path of provided filepath.
  */
 function makeAbsolute(cwd, filepath) {
-    if (path.isAbsolute(filepath)) {
-        return normalize(filepath);
-    }
-    var fullpath = path.resolve(cwd, filepath);
-    return normalize(fullpath);
+    return normalize(path.resolve(cwd, filepath));
 }
 exports.makeAbsolute = makeAbsolute;
 });
@@ -25345,8 +24763,8 @@ var entry = createCommonjsModule(function (module, exports) {
 Object.defineProperty(exports, "__esModule", { value: true });
 
 
-var DeepFilter = /** @class */ (function () {
-    function DeepFilter(options, micromatchOptions) {
+var EntryFilter = /** @class */ (function () {
+    function EntryFilter(options, micromatchOptions) {
         this.options = options;
         this.micromatchOptions = micromatchOptions;
         this.index = new Map();
@@ -25354,7 +24772,7 @@ var DeepFilter = /** @class */ (function () {
     /**
      * Returns filter for directories.
      */
-    DeepFilter.prototype.getFilter = function (positive, negative) {
+    EntryFilter.prototype.getFilter = function (positive, negative) {
         var _this = this;
         var positiveRe = pattern.convertPatternsToRe(positive, this.micromatchOptions);
         var negativeRe = pattern.convertPatternsToRe(negative, this.micromatchOptions);
@@ -25363,7 +24781,7 @@ var DeepFilter = /** @class */ (function () {
     /**
      * Returns true if entry must be added to result.
      */
-    DeepFilter.prototype.filter = function (entry, positiveRe, negativeRe) {
+    EntryFilter.prototype.filter = function (entry, positiveRe, negativeRe) {
         // Exclude duplicate results
         if (this.options.unique) {
             if (this.isDuplicateEntry(entry)) {
@@ -25383,31 +24801,31 @@ var DeepFilter = /** @class */ (function () {
     /**
      * Return true if the entry already has in the cross reader index.
      */
-    DeepFilter.prototype.isDuplicateEntry = function (entry) {
+    EntryFilter.prototype.isDuplicateEntry = function (entry) {
         return this.index.has(entry.path);
     };
     /**
      * Create record in the cross reader index.
      */
-    DeepFilter.prototype.createIndexRecord = function (entry) {
+    EntryFilter.prototype.createIndexRecord = function (entry) {
         this.index.set(entry.path, undefined);
     };
     /**
      * Returns true for non-files if the «onlyFiles» option is enabled.
      */
-    DeepFilter.prototype.onlyFileFilter = function (entry) {
+    EntryFilter.prototype.onlyFileFilter = function (entry) {
         return this.options.onlyFiles && !entry.isFile();
     };
     /**
      * Returns true for non-directories if the «onlyDirectories» option is enabled.
      */
-    DeepFilter.prototype.onlyDirectoryFilter = function (entry) {
+    EntryFilter.prototype.onlyDirectoryFilter = function (entry) {
         return this.options.onlyDirectories && !entry.isDirectory();
     };
     /**
      * Return true when `absolute` option is enabled and matched to the negative patterns.
      */
-    DeepFilter.prototype.isSkippedByAbsoluteNegativePatterns = function (entry, negativeRe) {
+    EntryFilter.prototype.isSkippedByAbsoluteNegativePatterns = function (entry, negativeRe) {
         if (!this.options.absolute) {
             return false;
         }
@@ -25420,12 +24838,12 @@ var DeepFilter = /** @class */ (function () {
      * First, just trying to apply patterns to the path.
      * Second, trying to apply patterns to the path with final slash (need to micromatch to support «directory/**» patterns).
      */
-    DeepFilter.prototype.isMatchToPatterns = function (filepath, patternsRe) {
+    EntryFilter.prototype.isMatchToPatterns = function (filepath, patternsRe) {
         return pattern.matchAny(filepath, patternsRe) || pattern.matchAny(filepath + '/', patternsRe);
     };
-    return DeepFilter;
+    return EntryFilter;
 }());
-exports.default = DeepFilter;
+exports.default = EntryFilter;
 });
 
 unwrapExports(entry);
@@ -25477,7 +24895,7 @@ var Reader = /** @class */ (function () {
      * Returns transformed entry.
      */
     Reader.prototype.transform = function (entry$$1) {
-        if (this.options.absolute && !path.isAbsolute(entry$$1.path)) {
+        if (this.options.absolute) {
             entry$$1.path = path_1.makeAbsolute(this.options.cwd, entry$$1.path);
         }
         if (this.options.markDirectories && entry$$1.isDirectory()) {
@@ -25648,10 +25066,9 @@ var FileSystem = /** @class */ (function () {
      * Return an implementation of the Entry interface.
      */
     FileSystem.prototype.makeEntry = function (stat, pattern) {
-        return Object.assign(stat, {
-            path: pattern,
-            depth: pattern.split('/').length
-        });
+        stat.path = pattern;
+        stat.depth = pattern.split('/').length;
+        return stat;
     };
     return FileSystem;
 }());
@@ -26271,98 +25688,118 @@ fastGlob.generateTasks = generateTasks;
 var umd = createCommonjsModule(function (module, exports) {
 (function (global, factory) {
 	module.exports = factory();
-}(commonjsGlobal, (function () {
-var isMergeableObject = function isMergeableObject(value) {
-	return isNonNullObject(value)
-		&& !isSpecial(value)
-};
+}(commonjsGlobal, function () {
+	var isMergeableObject = function isMergeableObject(value) {
+		return isNonNullObject(value)
+			&& !isSpecial(value)
+	};
 
-function isNonNullObject(value) {
-	return !!value && typeof value === 'object'
-}
-
-function isSpecial(value) {
-	var stringValue = Object.prototype.toString.call(value);
-
-	return stringValue === '[object RegExp]'
-		|| stringValue === '[object Date]'
-		|| isReactElement(value)
-}
-
-// see https://github.com/facebook/react/blob/b5ac963fb791d1298e7f396236383bc955f916c1/src/isomorphic/classic/element/ReactElement.js#L21-L25
-var canUseSymbol = typeof Symbol === 'function' && Symbol.for;
-var REACT_ELEMENT_TYPE = canUseSymbol ? Symbol.for('react.element') : 0xeac7;
-
-function isReactElement(value) {
-	return value.$$typeof === REACT_ELEMENT_TYPE
-}
-
-function emptyTarget(val) {
-	return Array.isArray(val) ? [] : {}
-}
-
-function cloneUnlessOtherwiseSpecified(value, options) {
-	return (options.clone !== false && options.isMergeableObject(value))
-		? deepmerge(emptyTarget(value), value, options)
-		: value
-}
-
-function defaultArrayMerge(target, source, options) {
-	return target.concat(source).map(function(element) {
-		return cloneUnlessOtherwiseSpecified(element, options)
-	})
-}
-
-function mergeObject(target, source, options) {
-	var destination = {};
-	if (options.isMergeableObject(target)) {
-		Object.keys(target).forEach(function(key) {
-			destination[key] = cloneUnlessOtherwiseSpecified(target[key], options);
-		});
+	function isNonNullObject(value) {
+		return !!value && typeof value === 'object'
 	}
-	Object.keys(source).forEach(function(key) {
-		if (!options.isMergeableObject(source[key]) || !target[key]) {
-			destination[key] = cloneUnlessOtherwiseSpecified(source[key], options);
-		} else {
-			destination[key] = deepmerge(target[key], source[key], options);
+
+	function isSpecial(value) {
+		var stringValue = Object.prototype.toString.call(value);
+
+		return stringValue === '[object RegExp]'
+			|| stringValue === '[object Date]'
+			|| isReactElement(value)
+	}
+
+	// see https://github.com/facebook/react/blob/b5ac963fb791d1298e7f396236383bc955f916c1/src/isomorphic/classic/element/ReactElement.js#L21-L25
+	var canUseSymbol = typeof Symbol === 'function' && Symbol.for;
+	var REACT_ELEMENT_TYPE = canUseSymbol ? Symbol.for('react.element') : 0xeac7;
+
+	function isReactElement(value) {
+		return value.$$typeof === REACT_ELEMENT_TYPE
+	}
+
+	function emptyTarget(val) {
+		return Array.isArray(val) ? [] : {}
+	}
+
+	function cloneUnlessOtherwiseSpecified(value, options) {
+		return (options.clone !== false && options.isMergeableObject(value))
+			? deepmerge(emptyTarget(value), value, options)
+			: value
+	}
+
+	function defaultArrayMerge(target, source, options) {
+		return target.concat(source).map(function(element) {
+			return cloneUnlessOtherwiseSpecified(element, options)
+		})
+	}
+
+	function getMergeFunction(key, options) {
+		if (!options.customMerge) {
+			return deepmerge
 		}
-	});
-	return destination
-}
-
-function deepmerge(target, source, options) {
-	options = options || {};
-	options.arrayMerge = options.arrayMerge || defaultArrayMerge;
-	options.isMergeableObject = options.isMergeableObject || isMergeableObject;
-
-	var sourceIsArray = Array.isArray(source);
-	var targetIsArray = Array.isArray(target);
-	var sourceAndTargetTypesMatch = sourceIsArray === targetIsArray;
-
-	if (!sourceAndTargetTypesMatch) {
-		return cloneUnlessOtherwiseSpecified(source, options)
-	} else if (sourceIsArray) {
-		return options.arrayMerge(target, source, options)
-	} else {
-		return mergeObject(target, source, options)
-	}
-}
-
-deepmerge.all = function deepmergeAll(array, options) {
-	if (!Array.isArray(array)) {
-		throw new Error('first argument should be an array')
+		var customMerge = options.customMerge(key);
+		return typeof customMerge === 'function' ? customMerge : deepmerge
 	}
 
-	return array.reduce(function(prev, next) {
-		return deepmerge(prev, next, options)
-	}, {})
-};
+	function getEnumerableOwnPropertySymbols(target) {
+		return Object.getOwnPropertySymbols
+			? Object.getOwnPropertySymbols(target).filter(function(symbol) {
+				return target.propertyIsEnumerable(symbol)
+			})
+			: []
+	}
 
-var deepmerge_1 = deepmerge;
+	function getKeys(target) {
+		return Object.keys(target).concat(getEnumerableOwnPropertySymbols(target))
+	}
 
-return deepmerge_1;
+	function mergeObject(target, source, options) {
+		var destination = {};
+		if (options.isMergeableObject(target)) {
+			getKeys(target).forEach(function(key) {
+				destination[key] = cloneUnlessOtherwiseSpecified(target[key], options);
+			});
+		}
+		getKeys(source).forEach(function(key) {
+			if (!options.isMergeableObject(source[key]) || !target[key]) {
+				destination[key] = cloneUnlessOtherwiseSpecified(source[key], options);
+			} else {
+				destination[key] = getMergeFunction(key, options)(target[key], source[key], options);
+			}
+		});
+		return destination
+	}
 
-})));
+	function deepmerge(target, source, options) {
+		options = options || {};
+		options.arrayMerge = options.arrayMerge || defaultArrayMerge;
+		options.isMergeableObject = options.isMergeableObject || isMergeableObject;
+
+		var sourceIsArray = Array.isArray(source);
+		var targetIsArray = Array.isArray(target);
+		var sourceAndTargetTypesMatch = sourceIsArray === targetIsArray;
+
+		if (!sourceAndTargetTypesMatch) {
+			return cloneUnlessOtherwiseSpecified(source, options)
+		} else if (sourceIsArray) {
+			return options.arrayMerge(target, source, options)
+		} else {
+			return mergeObject(target, source, options)
+		}
+	}
+
+	deepmerge.all = function deepmergeAll(array, options) {
+		if (!Array.isArray(array)) {
+			throw new Error('first argument should be an array')
+		}
+
+		return array.reduce(function(prev, next) {
+			return deepmerge(prev, next, options)
+		}, {})
+	};
+
+	var deepmerge_1 = deepmerge;
+
+	return deepmerge_1;
+
+}));
 });
 
 var deepmerge_ = /*#__PURE__*/Object.freeze({
