@@ -7,9 +7,11 @@ notifications:
 node_js:
   - '10'
   - '11'
+  - '12'
+  - '13'
   - '8'
 script:
-  - yarn run test:prod && yarn run build
+  - npm run test:prod && npm run build
 branches:
   except:
     - /^v\d+\.\d+\.\d+$/
