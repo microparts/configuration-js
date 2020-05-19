@@ -1,6 +1,10 @@
 Javascript microservice configuration library
 ---------------------------------------------
 
+This repo moved to https://github.com/spacetab-io/configuration-js
+-------
+
+
 [![Build Status](https://travis-ci.org/microparts/configuration-js.svg?branch=master)](https://travis-ci.org/microparts/configuration-js)
 
 Production-ready configuration for microservices. Written in TypeScript.
